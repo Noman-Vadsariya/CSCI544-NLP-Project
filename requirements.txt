@@ -1,0 +1,9 @@
+torch>=2.1.0
+transformers>=4.35.0
+datasets>=2.12.0
+tqdm
+torchaudio
+torchvision
+accelerate
+sentencepiece
+rouge-score
