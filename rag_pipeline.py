@@ -1,30 +1,26 @@
-import numpy as np
-import faiss
-import glob
+import os
 
-from sentence_transformers import SentenceTransformer
-from datasets import load_dataset
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 #================================== load data ==================================
+
+import glob
+from datasets import load_dataset
+import faiss
 
 contexts = []
 queries = []
 answers = []
 
-# load all compact datasets
-dataset_paths = glob.glob('data/raw_datasets/*_compact/*/ds.parquet')
+dataset_paths = glob.glob('data/raw_datasets/combined_compact/train/ds.parquet')
 
 for path in dataset_paths:
-
     ds = load_dataset('parquet', data_files=path)['train']
 
     for ex in ds:
-        ctx = ex['context']
-
-        for q, a in zip(ex['prompts'], ex['responses']):
-            contexts.append(ctx)
-            queries.append(q)
-            answers.append(a)
+        contexts.append(ex['context'])
+        queries.append(ex['prompts'][0])
+        answers.append(ex['responses'][0])
 
 print('Dataset loaded sucessfully!')
 print('Total QA pairs:', len(queries))
@@ -37,49 +33,58 @@ answers = answers[:20000]
 
 #================================== embeddings ==================================
 
+import torch    
+from sentence_transformers import SentenceTransformer
 
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+torch.set_num_threads(1)
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2",
+    device="cpu"
+)
 
 context_embeddings = model.encode(
     contexts,
-    batch_size=16,
-    show_progress_bar=True,
+    batch_size=32,              # larger batches = faster
     convert_to_numpy=True,
-    device='cpu'
-).astype('float32')
+    normalize_embeddings=True,  # improves retrieval quality
+    show_progress_bar=True
+).astype("float32")
 
 #================================== build vector index - faiss ==================================
 
 dim = context_embeddings.shape[1]
 
-# build the faiss index
-index = faiss.IndexFlatL2(dim)
+index = faiss.IndexFlatIP(dim)  # inner product for cosine similarity
 index.add(context_embeddings)
 
+print("FAISS index built:", index.ntotal)
 
 #================================== test retrieval ==================================
 
-# function to retrieve top-k relevant contexts for a given query
 def retrieve_contexts(query, top_k=5):
-    query_embedding = model.encode([query], convert_to_numpy=True).astype('float32')
-    distances, indices = index.search(query_embedding, top_k)
-    retrieved_contexts = [contexts[i] for i in indices[0]]
-    return retrieved_contexts
 
-# test for example queries
+    query_embedding = model.encode(
+        [query],
+        normalize_embeddings=True,
+        convert_to_numpy=True
+    ).astype("float32")
+
+    scores, indices = index.search(query_embedding, top_k)
+
+    return [contexts[i] for i in indices[0]]
+
 for i in range(5):
+
     query = queries[i]
     true_answer = answers[i]
 
-    retrieved_contexts = retrieve_contexts(query, top_k=5)
+    retrieved_contexts = retrieve_contexts(query)
 
-    print('\n==============================')
-    print('Query:', query)
-    print('True Answer:', true_answer)
+    print("\n==============================")
+    print("Query:", query)
+    print("True Answer:", true_answer)
 
     for j, ctx in enumerate(retrieved_contexts):
-        print(f'\nRetrieved Context {j+1}:')
-        print(ctx[:300])  # print only first 300 chars
+        print(f"\nRetrieved Context {j+1}:")
+        print(ctx[:300])
