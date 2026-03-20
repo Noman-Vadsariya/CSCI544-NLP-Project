@@ -1,4 +1,2 @@
 .venv
 data/raw_datasets/raw_hotpotQA/*
-data/raw_datasets/ropes_compact/*
-data/raw_datasets/squad_compact/*
