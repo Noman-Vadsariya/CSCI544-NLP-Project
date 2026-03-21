@@ -105,3 +105,4 @@ urllib3==2.6.3
 wadler-lindig==0.1.7
 xxhash==3.6.0
 yarl==1.23.0
+sentencepiece
