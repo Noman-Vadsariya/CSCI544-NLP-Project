@@ -1,21 +1,41 @@
 import gc
+from collections import Counter
 
 from datasets import Dataset, load_dataset
+import pandas as pd
 from tqdm import tqdm
 
-if __name__ == "__main__":
-    ds_name = "data/raw_datasets/hotpotQA"
+def merge_parquet_file():
+    # Replace with your actual file paths
+    file1 = 'data/raw_datasets/raw_hotpotQA/train-0.parquet'
+    file2 = 'data/raw_datasets/raw_hotpotQA/train-1.parquet'
+    output_file = 'data/raw_datasets/raw_hotpotQA/train.parquet'
 
-    for split in ["train", "validation"]:
+    # Read both Parquet files
+    df1 = pd.read_parquet(file1)
+    df2 = pd.read_parquet(file2)
+
+    # Concatenate the DataFrames
+    merged_df = pd.concat([df1, df2], ignore_index=True)
+
+    # Save the merged DataFrame to a new Parquet file
+    merged_df.to_parquet(output_file)
+
+if __name__ == "__main__":
+    ds_name = "data/raw_datasets/raw_hotpotQA"
+    # merge_parquet_file()
+    for split in ["train", "test"]:
         ctx_qa_dict = dict()
         ds = load_dataset(ds_name, split=split)
-        print(f"Original size: {len(ds)}")
         for i, sample in tqdm(enumerate(ds)):
-            ctx_template = "{title}\n{context}"
+            gold_titles = Counter(sample["supporting_facts"]["title"])
+            sentences = []
+            for title, sent in zip(sample["context"]["title"], sample["context"]["sentences"][0]):
+                if title in gold_titles:
+                    sentences.append(sent)
+
             response = sample["answer"]
-            title = sample["context"]["title"][0]
-            sentences = " ".join(sample["context"]["sentences"][0])
-            ctx = ctx_template.format(title=title, context=sentences)
+            ctx = "\n".join(sentences)
             q = sample["question"]
             if ctx not in ctx_qa_dict:
                 ctx_qa_dict[ctx] = {"prompts": [], "responses": []}
@@ -37,7 +57,7 @@ if __name__ == "__main__":
         # save to a new dataset
         ds = Dataset.from_list(samples)
 
-        save_path = f"./data/raw_datasets/hotpotQA_compact/{split}/ds.parquet"
+        save_path = f"./data/raw_datasets/hotpotQA_gold_compact/{split}/ds.parquet"
         print(f"Saving dataset to {save_path}")
         ds.to_parquet(save_path)
         print("=" * 80)
