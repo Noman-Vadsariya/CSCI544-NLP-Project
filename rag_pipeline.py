@@ -3,6 +3,7 @@ import glob
 import faiss
 
 from datasets import load_dataset
+from pinecone import Pinecone, ServerlessSpec
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -51,14 +52,53 @@ context_embeddings = model.encode(
     show_progress_bar=True
 ).astype("float32")
 
+#================================== build vector index - pinecone ==================================
+
+print('Uploading embeddings to Pinecone...')
+
+# in terminal: export PINECONE_API_KEY='your_key_here'
+pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
+
+index_name = 'rag-index'
+
+# create index if it doesn't exist
+if index_name not in pc.list_indexes().names():
+    pc.create_index(
+        name=index_name,
+        dimension=context_embeddings.shape[1],
+        metric="cosine",
+        spec=ServerlessSpec(
+            cloud="aws",
+            region="us-west-2"
+        )
+    )
+
+index = pc.Index(index_name)
+
+vectors = [
+    (str(i), context_embeddings[i].tolist(), {"text": contexts[i]})
+    for i in range(len(contexts))
+]
+
+# upsert in batches (important!)
+batch_size = 100
+
+for i in range(0, len(vectors), batch_size):
+    index.upsert(
+    vectors=vectors[i:i+batch_size],
+    namespace='default'
+)
+
+print('Pinecone index ready!')
+
 #================================== build vector index - faiss ==================================
 
-dim = context_embeddings.shape[1]
+# dim = context_embeddings.shape[1]
 
-index = faiss.IndexFlatIP(dim)  # inner product for cosine similarity
-index.add(context_embeddings)
+# index = faiss.IndexFlatIP(dim)  # inner product for cosine similarity
+# index.add(context_embeddings)
 
-print("FAISS index built:", index.ntotal)
+# print("FAISS index built:", index.ntotal)
 
 #================================== test retrieval ==================================
 
@@ -68,11 +108,16 @@ def retrieve_contexts(query, top_k=5):
         [query],
         normalize_embeddings=True,
         convert_to_numpy=True
-    ).astype("float32")
+    )[0].tolist()
 
-    scores, indices = index.search(query_embedding, top_k)
+    results = index.query(
+        vector=query_embedding,
+        top_k=top_k,
+        include_metadata=True,
+        namespace="default"
+)
 
-    return [contexts[i] for i in indices[0]]
+    return [match["metadata"]["text"] for match in results["matches"]]
 
 for i in range(5):
 
