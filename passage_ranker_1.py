@@ -1,7 +1,7 @@
 
 #!/usr/bin/env python3
 """
-passage_ranker_1.py --data_path hotpotqa_json/validation.json
+passage_ranker_1.py
 
 Script Description:
     This script loads the e5 model and uses it to
@@ -18,6 +18,9 @@ Dependencies:
         hotpotqa_json/validation.json
     - Pip install the below libs
     - It may work on CPU or may require GPU...idk yet
+
+Run this script like:
+    python passage_ranker_1.py --data_path hotpotqa_json/validation.json
 
 Authored by:
     Ayush Saha

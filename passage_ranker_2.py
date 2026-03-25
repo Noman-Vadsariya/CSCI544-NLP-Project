@@ -18,6 +18,9 @@ Dependencies:
     - Pip install the below libs
     - It may work on CPU or may require GPU...idk yet
 
+Run this script like:
+    python passage_ranker_2.py --input hotpotqa_json/validation.json
+
 Authored by:
     Ayush Saha
 """
