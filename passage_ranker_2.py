@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-passage_ranker.py
+passage_ranker_2.py
 
 Script Description:
     This script loads the SPLADE model and uses it to
@@ -8,7 +8,7 @@ Script Description:
     for each example in the validation.json file.
 
 Accuracy:
-    In >85% of cases, the model's top 2 passage
+    In >84% of cases, the model's top 2 passage
     indices overlap with the top-1 ground-truth passage
     index.
 
