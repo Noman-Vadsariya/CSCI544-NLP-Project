@@ -1,5 +1,0 @@
-sentence-transformers
-faiss-cpu
-datasets
-numpy
-tqdm
