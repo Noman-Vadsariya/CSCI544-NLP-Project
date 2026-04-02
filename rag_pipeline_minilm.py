@@ -1,3 +1,5 @@
+####### miniLM encoder version
+
 import os
 import glob
 import faiss
@@ -41,6 +43,7 @@ torch.set_num_threads(1)
 
 ### set up sentence transformer model for embedding contexts
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")  
+# model = SentenceTransformer('BAAI/bge-base-en-v1.5')
 
 context_embeddings = model.encode(
     contexts,
