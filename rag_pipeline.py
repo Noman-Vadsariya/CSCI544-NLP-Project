@@ -1,9 +1,12 @@
 import os
 import glob
 import faiss
+import torch    
 
+from sentence_transformers import SentenceTransformer
 from datasets import load_dataset
 from pinecone import Pinecone, ServerlessSpec
+from sentence_transformers import CrossEncoder
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -23,7 +26,6 @@ for path in dataset_paths:
         queries.append(ex['prompts'][0])
         answers.append(ex['responses'][0])
 
-print('Dataset loaded sucessfully!')
 print('Total QA pairs:', len(queries))
 print('Total contexts:', len(set(contexts)))  # set to get unique contexts
 
@@ -34,15 +36,11 @@ answers = answers[:20000]
 
 #================================== embeddings ==================================
 
-import torch    
-from sentence_transformers import SentenceTransformer
-
+# limit pytorch to 1 thread to avoid oversubscription
 torch.set_num_threads(1)
 
-model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2",
-    device="cpu"
-)
+### set up sentence transformer model for embedding contexts
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")  
 
 context_embeddings = model.encode(
     contexts,
@@ -73,16 +71,15 @@ if index_name not in pc.list_indexes().names():
         )
     )
 
-index = pc.Index(index_name)
+index = pc.Index(index_name)  # connect to index
 
-vectors = [
-    (str(i), context_embeddings[i].tolist(), {"text": contexts[i]})
-    for i in range(len(contexts))
-]
+# prepare data for upsert
+vectors = [(str(i), context_embeddings[i].tolist(), {"text": contexts[i]}) for i in range(len(contexts))]
 
 # upsert in batches (important!)
 batch_size = 100
 
+### upsert all vectors with metadata in batches
 for i in range(0, len(vectors), batch_size):
     index.upsert(
     vectors=vectors[i:i+batch_size],
@@ -100,36 +97,76 @@ print('Pinecone index ready!')
 
 # print("FAISS index built:", index.ntotal)
 
+
+#================================== bert reranker ==================================
+
+### initialize bert cross encoder for reranking retrieved contexts
+reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+
+### function to rerank retrieved contexts based on relevance to wuery
+def retrieve_with_rerank(query, top_k=5):
+
+    # step 1: get more candidates from Pinecone
+    candidates = retrieve_contexts(query, top_k=10)
+
+    # step 2: prepare query-context pairs
+    pairs = [[query, ctx] for ctx in candidates]
+
+    # step 3: get BERT relevance scores
+    scores = reranker.predict(pairs)
+
+    # step 4: sort by score (descending)
+    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+
+    # step 5: return top-k reranked results
+    return [ctx for ctx, _ in ranked[:top_k]]
+
+
+
 #================================== test retrieval ==================================
 
+### function to retrieve contexts from piecone based on query embedding
 def retrieve_contexts(query, top_k=5):
-
+    # embed query using same modell + settings as contexts
     query_embedding = model.encode(
         [query],
         normalize_embeddings=True,
         convert_to_numpy=True
     )[0].tolist()
 
+    # query pinecone idx for top k similar contexts
     results = index.query(
         vector=query_embedding,
         top_k=top_k,
         include_metadata=True,
-        namespace="default"
+        namespace='default'
 )
+    # extract + return text of referenced contexts
+    return [match['metadata']['text'] for match in results['matches']]
 
-    return [match["metadata"]["text"] for match in results["matches"]]
 
-for i in range(5):
+### evaluate retrieval accuracy on sample of queries - check if true answer appears in retrieved contxts
+num_correct = 0
+num_samples = 200  # start small for testing
 
+for i in range(num_samples):
     query = queries[i]
     true_answer = answers[i]
 
-    retrieved_contexts = retrieve_contexts(query)
+    retrieved_contexts = retrieve_with_rerank(query)  # retrieve from pinecone + rerank with BERT
 
-    print("\n==============================")
-    print("Query:", query)
-    print("True Answer:", true_answer)
+    # check if answer appears in ANY retrieved chunk
+    found_ctx = any(true_answer.lower() in ctx.lower() for ctx in retrieved_contexts)
 
-    for j, ctx in enumerate(retrieved_contexts):
-        print(f"\nRetrieved Context {j+1}:")
-        print(ctx[:300])
+    # count as correct if answer found in any retrieved context
+    if found_ctx:
+        num_correct += 1  
+
+    print('\n-------------------------------')
+    print('Query:', query)
+    print('True Answer:', true_answer)
+    print('Found in top 5:', found_ctx)
+
+# compute retrieval accuracy
+accuracy = num_correct / num_samples
+print(f'\nRetrieval Accuracy@5: {accuracy:.4f}')

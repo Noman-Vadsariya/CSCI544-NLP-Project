@@ -3,3 +3,4 @@ faiss-cpu
 datasets
 numpy
 tqdm
+pinecone
