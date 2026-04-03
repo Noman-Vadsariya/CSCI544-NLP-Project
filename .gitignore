@@ -1,2 +1,10 @@
 .venv
+checkpoints/
 data/raw_datasets/raw_hotpotQA/*
+data/processed_datasets/*
+slurm_logs/
+data/processed_datasets/
+wandb/
+train_outputs
+data/processed_datasets/
+data/processed_datasets/
