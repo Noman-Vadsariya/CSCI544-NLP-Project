@@ -6,8 +6,7 @@ import evaluate
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm 
 
-
-from rag_pipeline import retrieve_contexts, queries, answers
+from rag_pipeline_bge import retrieve_with_rerank, queries, answers
 
 rouge = evaluate.load('rouge')
 
@@ -49,7 +48,7 @@ test_answers = answers[:1000]
 for query, true_answer in tqdm(zip(test_queries, test_answers), total=len(test_queries)):
     references.append(true_answer)
 
-    top_chunks = retrieve_contexts(query, top_k=3)
+    top_chunks = retrieve_with_rerank(query, top_k=3)
     context_str = " ".join(top_chunks) 
 
     prompt = f"Context: {context_str}\n\nQuestion: {query}\nAnswer:"

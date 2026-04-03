@@ -3,3 +3,7 @@ faiss-cpu
 datasets
 numpy
 tqdm
+pinecone
+torch
+transformers
+scikit-learn
