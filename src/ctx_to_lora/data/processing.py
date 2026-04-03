@@ -30,6 +30,9 @@ from ctx_to_lora.utils import check_is_iterable, concat_list
 
 logger = logging.getLogger()
 
+# Bump this when tokenization/labeling semantics change so cached datasets are rebuilt.
+TOKENIZATION_CACHE_VERSION = "sft_eot_supervision_v1"
+
 COLS_TO_KEEP_PREPROCESSING = [
     "context",
     "prompts",
@@ -302,7 +305,7 @@ def get_tokenized_dataset(
     )
 
     all_kwargs = {**load_and_process_kwargs, **tokenize_kwargs}
-    kwargs_str = json.dumps(all_kwargs)
+    kwargs_str = json.dumps(all_kwargs) + TOKENIZATION_CACHE_VERSION
     kwargs_str += tokenizer.name_or_path + ctx_tokenizer.name_or_path
     logger.debug(f"Tokenizing dataset with kwargs: {kwargs_str}")
     kwargs_str += repr(tokenizer) + repr(ctx_tokenizer)
@@ -605,8 +608,43 @@ def get_sft_prompt_formatting_fn(
         )
 
         labels = []
+        # Gemma's chat template doesn't support {% generation %}, so
+        # assistant_masks may be all zeros. Build mask manually by finding
+        # tokens between <start_of_turn>model\n and <end_of_turn>.
+        start_of_turn_id = tokenizer.convert_tokens_to_ids("<start_of_turn>")
+        end_of_turn_id = tokenizer.convert_tokens_to_ids("<end_of_turn>")
+        model_token_id = tokenizer.encode("model", add_special_tokens=False)[0]
+        newline_id = tokenizer.encode("\n", add_special_tokens=False)[0]
+
         for tok_ids, masks in zip(tokens["input_ids"], tokens["assistant_masks"]):
-            o = [id_ if mask else IGNORE_INDEX for id_, mask in zip(tok_ids, masks)]
+            if any(masks):
+                # assistant_masks works for this template, use as-is
+                o = [id_ if mask else IGNORE_INDEX for id_, mask in zip(tok_ids, masks)]
+            else:
+                # manually identify assistant turn tokens
+                o = [IGNORE_INDEX] * len(tok_ids)
+                in_assistant = False
+                for j, id_ in enumerate(tok_ids):
+                    if (id_ == start_of_turn_id
+                            and j + 2 < len(tok_ids)
+                            and tok_ids[j + 1] == model_token_id
+                            and tok_ids[j + 2] == newline_id):
+                        in_assistant = True
+                        continue
+                    if id_ == end_of_turn_id:
+                        if in_assistant:
+                            o[j] = id_
+                        in_assistant = False
+                        continue
+                    if in_assistant and id_ != model_token_id and not (j > 0 and tok_ids[j - 1] == start_of_turn_id):
+                        o[j] = tok_ids[j]
+
+            # Supervise the assistant terminator token as well. Without this,
+            # Gemma-style checkpoints can learn to continue the assistant turn
+            # instead of ending it with <end_of_turn>.
+            for j, id_ in enumerate(tok_ids):
+                if id_ == end_of_turn_id and j > 0 and o[j - 1] != IGNORE_INDEX:
+                    o[j] = id_
             labels.append(o)
 
         del tokens["assistant_masks"]
@@ -664,13 +702,12 @@ def convert_ctx_prompt_response_to_messages(
             else:
                 user_msg = example["context"].strip() + "\n\n" + user_msg
 
-        messages_list.append(
-            [
-                {"role": "system", "content": system_msg.strip()},
-                {"role": "user", "content": user_msg.strip()},
-                {"role": "assistant", "content": response},
-            ]
-        )
+        msgs = []
+        if system_msg:
+            msgs.append({"role": "system", "content": system_msg.strip()})
+        msgs.append({"role": "user", "content": user_msg.strip()})
+        msgs.append({"role": "assistant", "content": response})
+        messages_list.append(msgs)
 
     return {"messages_list": messages_list}
 
@@ -986,7 +1023,6 @@ def tokenize_ctx_text(
         tokenized_text = tokenizer.apply_chat_template(
             [
                 [
-                    {"role": "system", "content": ""},
                     {"role": "user", "content": ctx.strip()},
                 ]
                 if isinstance(ctx, str)
