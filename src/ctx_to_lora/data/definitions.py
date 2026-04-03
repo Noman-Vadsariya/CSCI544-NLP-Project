@@ -125,6 +125,18 @@ DS_KWARGS = {
             split="train",
         )
     ),
+    "hotpotQA_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/hotpotQA_compact/train/ds.parquet",
+            split="train",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
 }
 
 # add ctx_numbers
