@@ -2,7 +2,7 @@
 
 import os
 import glob
-import faiss
+# import faiss
 import torch    
 
 from sentence_transformers import SentenceTransformer
