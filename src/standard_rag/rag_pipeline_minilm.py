@@ -1,4 +1,4 @@
-##### BGE encoder version
+####### miniLM encoder version
 
 import os
 import glob
@@ -41,13 +41,12 @@ answers = answers[:20000]
 # limit pytorch to 1 thread to avoid oversubscription
 torch.set_num_threads(1)
 
-### set up sentence transformer model for embedding contexts - use BGE instead
-model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')  
-
-context_inputs = ['passage: ' + c for c in contexts]
+### set up sentence transformer model for embedding contexts
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")  
+# model = SentenceTransformer('BAAI/bge-base-en-v1.5')
 
 context_embeddings = model.encode(
-    context_inputs,
+    contexts,
     batch_size=32,              # larger batches = faster
     convert_to_numpy=True,
     normalize_embeddings=True,  # improves retrieval quality
@@ -133,7 +132,7 @@ def retrieve_with_rerank(query, top_k=5):
 def retrieve_contexts(query, top_k=5):
     # embed query using same modell + settings as contexts
     query_embedding = model.encode(
-        ['query: ' + query],
+        [query],
         normalize_embeddings=True,
         convert_to_numpy=True
     )[0].tolist()
