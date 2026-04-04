@@ -2,7 +2,7 @@
 
 import os
 import glob
-import faiss
+# import faiss
 import torch    
 
 from sentence_transformers import SentenceTransformer
@@ -41,17 +41,22 @@ answers = answers[:20000]
 # limit pytorch to 1 thread to avoid oversubscription
 torch.set_num_threads(1)
 
+### detect GPU automatically
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'Using device: {device}')
+
 ### set up sentence transformer model for embedding contexts - use BGE instead
-model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')  
+model = SentenceTransformer('BAAI/bge-base-en-v1.5', device=device)  
 
 context_inputs = ['passage: ' + c for c in contexts]
 
 context_embeddings = model.encode(
     context_inputs,
-    batch_size=32,              # larger batches = faster
+    batch_size=32,   # larger batches = faster
     convert_to_numpy=True,
     normalize_embeddings=True,  # improves retrieval quality
-    show_progress_bar=True
+    show_progress_bar=True,
+    device =device  # add to ensure encoding happens on gpu if available
 ).astype("float32")
 
 #================================== build vector index - pinecone ==================================
@@ -105,7 +110,7 @@ print('Pinecone index ready!')
 #================================== bert reranker ==================================
 
 ### initialize bert cross encoder for reranking retrieved contexts
-reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
 
 ### function to rerank retrieved contexts based on relevance to wuery
 def retrieve_with_rerank(query, top_k=5):
