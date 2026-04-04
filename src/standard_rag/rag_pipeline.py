@@ -1,0 +1,90 @@
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+#================================== load data ==================================
+
+import glob
+from datasets import load_dataset
+import faiss
+
+contexts = []
+queries = []
+answers = []
+
+dataset_paths = glob.glob('data/raw_datasets/combined_compact/train/ds.parquet')
+
+for path in dataset_paths:
+    ds = load_dataset('parquet', data_files=path)['train']
+
+    for ex in ds:
+        contexts.append(ex['context'])
+        queries.append(ex['prompts'][0])
+        answers.append(ex['responses'][0])
+
+print('Dataset loaded sucessfully!')
+print('Total QA pairs:', len(queries))
+print('Total contexts:', len(set(contexts)))  # set to get unique contexts
+
+# limit dataset size for local testing
+contexts = contexts[:20000]
+queries = queries[:20000]
+answers = answers[:20000]
+
+#================================== embeddings ==================================
+
+import torch    
+from sentence_transformers import SentenceTransformer
+
+torch.set_num_threads(1)
+
+model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2",
+    device="cpu"
+)
+
+context_embeddings = model.encode(
+    contexts,
+    batch_size=32,              # larger batches = faster
+    convert_to_numpy=True,
+    normalize_embeddings=True,  # improves retrieval quality
+    show_progress_bar=True
+).astype("float32")
+
+#================================== build vector index - faiss ==================================
+
+dim = context_embeddings.shape[1]
+
+index = faiss.IndexFlatIP(dim)  # inner product for cosine similarity
+index.add(context_embeddings)
+
+print("FAISS index built:", index.ntotal)
+
+#================================== test retrieval ==================================
+
+def retrieve_contexts(query, top_k=5):
+
+    query_embedding = model.encode(
+        [query],
+        normalize_embeddings=True,
+        convert_to_numpy=True
+    ).astype("float32")
+
+    scores, indices = index.search(query_embedding, top_k)
+
+    return [contexts[i] for i in indices[0]]
+
+for i in range(5):
+
+    query = queries[i]
+    true_answer = answers[i]
+
+    retrieved_contexts = retrieve_contexts(query)
+
+    print("\n==============================")
+    print("Query:", query)
+    print("True Answer:", true_answer)
+
+    for j, ctx in enumerate(retrieved_contexts):
+        print(f"\nRetrieved Context {j+1}:")
+        print(ctx[:300])
