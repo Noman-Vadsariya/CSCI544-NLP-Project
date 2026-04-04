@@ -59,28 +59,30 @@ context_embeddings = model.encode(
     device =device  # add to ensure encoding happens on gpu if available
 ).astype("float32")
 
+
 #================================== build vector index - pinecone ==================================
 
 print('Uploading embeddings to Pinecone...')
 
-# in terminal: export PINECONE_API_KEY='your_key_here'
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 
 index_name = 'rag-index'
 
-# create index if it doesn't exist
-if index_name not in pc.list_indexes().names():
+# ✅ safer index check (pinecone api sometimes weird)
+existing_indexes = [idx.name for idx in pc.list_indexes()]
+
+if index_name not in existing_indexes:
     pc.create_index(
         name=index_name,
         dimension=context_embeddings.shape[1],
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-west-2"
+            region="us-east-1"   # free tier
         )
     )
 
-index = pc.Index(index_name)  # connect to index
+index = pc.Index(index_name)
 
 # prepare data for upsert
 vectors = [(str(i), context_embeddings[i].tolist(), {"text": contexts[i]}) for i in range(len(contexts))]
