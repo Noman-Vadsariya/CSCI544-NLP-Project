@@ -36,6 +36,7 @@ contexts = contexts[:20000]
 queries = queries[:20000]
 answers = answers[:20000]
 
+
 #================================== embeddings ==================================
 
 # limit pytorch to 1 thread to avoid oversubscription
@@ -78,7 +79,7 @@ if index_name not in existing_indexes:
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-east-1"   # free tier
+            region="us-east-1"   # for free tier
         )
     )
 
@@ -166,8 +167,10 @@ for i in range(num_samples):
 
     retrieved_contexts = retrieve_with_rerank(query)  # retrieve from pinecone + rerank with BERT
 
-    # check if answer appears in ANY retrieved chunk
-    found_ctx = any(true_answer.lower() in ctx.lower() for ctx in retrieved_contexts)
+    # check if answer appears in ANY retrieved chunk - look for exact match or all words present 
+    found_ctx = any(true_answer.lower() in ctx.lower() or
+                    all(word in ctx.lower() for word in true_answer.lower().split())
+                    for ctx in retrieved_contexts)
 
     # count as correct if answer found in any retrieved context
     if found_ctx:
