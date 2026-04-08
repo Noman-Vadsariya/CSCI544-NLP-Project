@@ -6,3 +6,6 @@ slurm_logs/
 wandb/
 train_outputs
 .env
+data/raw_datasets/self_gen/
+__pycache__/
+.claude/

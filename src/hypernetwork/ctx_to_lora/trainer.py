@@ -7,7 +7,7 @@ from transformers import Trainer
 from transformers.trainer_pt_utils import get_parameter_names
 from transformers.trainer_utils import IntervalStrategy
 
-from ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
+from src.hypernetwork.ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
 
 logger = logging.getLogger()
 

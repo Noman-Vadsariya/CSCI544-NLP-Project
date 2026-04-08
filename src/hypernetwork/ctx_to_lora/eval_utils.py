@@ -23,20 +23,20 @@ from transformers import (
     set_seed,
 )
 
-from ctx_to_lora.data.collator import eval_collator, generation_collator
-from ctx_to_lora.data.definitions import (
+from src.hypernetwork.ctx_to_lora.data.collator import eval_collator, generation_collator
+from src.hypernetwork.ctx_to_lora.data.definitions import (
     CLOSED_QA_DATASETS,
     CTX_AFFIXES,
     LONGBENCH_E_TASKS,
     LONGBENCH_TASKS,
     MULTI_ANSWER_DATASETS,
 )
-from ctx_to_lora.data.processing import (
+from src.hypernetwork.ctx_to_lora.data.processing import (
     get_tokenized_dataset,
     load_answers,
 )
-from ctx_to_lora.data.self_gen_template import SELF_QA_INTX
-from ctx_to_lora.metrics import (
+from src.hypernetwork.ctx_to_lora.data.self_gen_template import SELF_QA_INTX
+from src.hypernetwork.ctx_to_lora.metrics import (
     LENGTH_BINS,
     Evaluator,
     compute_metrics,
@@ -45,25 +45,25 @@ from ctx_to_lora.metrics import (
     compute_prefix_matching,
     compute_rouge,
 )
-from ctx_to_lora.model_loading import (
+from src.hypernetwork.ctx_to_lora.model_loading import (
     get_lora_config,
     get_model,
     get_model_and_tokenizer,
     get_tokenizer,
 )
-from ctx_to_lora.modeling.context_distillation import CtxDistillModel
-from ctx_to_lora.modeling.generative_adapter import GenerativeAdapter
-from ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
-from ctx_to_lora.modeling.llm_lingua import LLMLinguaModel
-from ctx_to_lora.modeling.text_to_lora import TextToLoRA
-from ctx_to_lora.tracker.tracker import (
+from src.hypernetwork.ctx_to_lora.modeling.context_distillation import CtxDistillModel
+from src.hypernetwork.ctx_to_lora.modeling.generative_adapter import GenerativeAdapter
+from src.hypernetwork.ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
+from src.hypernetwork.ctx_to_lora.modeling.llm_lingua import LLMLinguaModel
+from src.hypernetwork.ctx_to_lora.modeling.text_to_lora import TextToLoRA
+from src.hypernetwork.ctx_to_lora.tracker.tracker import (
     add_tracker,
     print_global_tracker_stats,
     print_tracker_stats,
     reset_trackers,
     save_tracker_stats_csv,
 )
-from ctx_to_lora.utils import clear_gpu, concat_list, get_run_name, setup_logging
+from src.hypernetwork.ctx_to_lora.utils import clear_gpu, concat_list, get_run_name, setup_logging
 
 logger = logging.getLogger()
 
