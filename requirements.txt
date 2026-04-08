@@ -106,3 +106,8 @@ wadler-lindig==0.1.7
 xxhash==3.6.0
 yarl==1.23.0
 sentencepiece
+faiss-cpu
+datasets
+numpy
+pinecone
+torch
