@@ -5,3 +5,4 @@ data/processed_datasets/
 slurm_logs/
 wandb/
 train_outputs
+.env

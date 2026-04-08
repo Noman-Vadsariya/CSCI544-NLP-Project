@@ -18,7 +18,7 @@ contexts = []
 queries = []
 answers = []
 
-dataset_paths = glob.glob('data/raw_datasets/combined_compact/train/ds.parquet')
+dataset_paths = glob.glob('data/raw_datasets/combined_compact/test/ds.parquet')
 
 for path in dataset_paths:
     ds = load_dataset('parquet', data_files=path)['train']
@@ -42,7 +42,8 @@ answers = answers[:20000]
 torch.set_num_threads(1)
 
 ### set up sentence transformer model for embedding contexts - use BGE instead
-model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')  
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = SentenceTransformer('BAAI/bge-base-en-v1.5', device=device)
 
 context_inputs = ['passage: ' + c for c in contexts]
 
