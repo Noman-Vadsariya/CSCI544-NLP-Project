@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 import json
+import os
 import random
 import re
 import time
 from typing import Any, Dict, List
+
+from datasets import Dataset
 
 import requests
 from datasets import load_dataset
@@ -197,11 +200,8 @@ def convert_example(ex: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def main():
-    print("Downloading ASQA from Hugging Face...")
-    ds = load_dataset("din0s/asqa", split="train")
-
-    out_path = "asqa_final.jsonl"
+def process_split(ds, out_path):
+    """Process a single split: scrape Wikipedia, format, write JSONL."""
     kept = 0
     skipped = 0
 
@@ -230,6 +230,40 @@ def main():
 
     print(f"Saved {kept} samples to {out_path}")
     print(f"Skipped {skipped} samples")
+    return out_path
+
+
+def jsonl_to_parquet(jsonl_path, parquet_path):
+    """Load a JSONL file and save it as parquet."""
+    samples = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            samples.append(json.loads(line))
+
+    ds = Dataset.from_list(samples)
+    os.makedirs(os.path.dirname(parquet_path), exist_ok=True)
+    ds.to_parquet(parquet_path)
+    print(f"Saved {len(ds)} samples to {parquet_path}")
+
+
+def main():
+    print("Downloading ASQA from Hugging Face...")
+    full_ds = load_dataset("din0s/asqa")
+
+    # Map source splits to output split names
+    split_map = {"train": "train", "dev": "test"}
+
+    for src_split, out_split in split_map.items():
+        print(f"\n{'=' * 60}")
+        print(f"Processing {src_split} -> {out_split}")
+        print(f"{'=' * 60}")
+
+        ds = full_ds[src_split]
+        jsonl_path = f"./data/raw_datasets/asqa_compact/asqa_{out_split}.jsonl"
+        parquet_path = f"./data/raw_datasets/asqa_compact/{out_split}/ds.parquet"
+
+        process_split(ds, jsonl_path)
+        jsonl_to_parquet(jsonl_path, parquet_path)
 
 
 if __name__ == "__main__":
