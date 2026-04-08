@@ -1,0 +1,45 @@
+#!/bin/bash
+#SBATCH --job-name=rag_baseline
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:a40:1             # Request 1 GPU
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8        # CPU cores for the FAISS retrieval
+#SBATCH --mem=32GB               # 32GB RAM to hold the FAISS index in memory
+#SBATCH --time=02:00:00          # 2 hours max runtime
+#SBATCH --output=rag_eval_%j.out # Standard output and error log
+
+
+module purge
+module load ver/2506 gcc/14.3.0 python/3.11.14 
+
+
+
+export HF_HOME=/scratch1/$USER/hf_cache
+mkdir -p $HF_HOME
+
+#HUGGIN FACE AND PINE CONE 
+export HF_TOKEN=$HF_TOKEN
+export PINECONE_API_KEY=$PINECONE_API_KEY
+
+which python
+
+
+
+echo "Setting up Python environment..."
+python -m venv rag_env
+source rag_env/bin/activate
+
+
+echo "Installing dependencies..."
+pip install --upgrade pip
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements.txt
+#evaluation tools installed
+pip install evaluate rouge_score accelerate
+
+#run script
+echo "Starting evaluation..."
+python evaluate_baseline.py
+
+echo "Job completed."

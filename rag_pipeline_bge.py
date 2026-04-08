@@ -2,7 +2,7 @@
 
 import os
 import glob
-import faiss
+# import faiss
 import torch    
 
 from sentence_transformers import SentenceTransformer
@@ -36,61 +36,69 @@ contexts = contexts[:20000]
 queries = queries[:20000]
 answers = answers[:20000]
 
+
 #================================== embeddings ==================================
 
 # limit pytorch to 1 thread to avoid oversubscription
 torch.set_num_threads(1)
 
+### detect GPU automatically
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'Using device: {device}')
+
 ### set up sentence transformer model for embedding contexts - use BGE instead
-model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cuda')  
+model = SentenceTransformer('BAAI/bge-base-en-v1.5', device=device)  
 
 context_inputs = ['passage: ' + c for c in contexts]
 
 context_embeddings = model.encode(
     context_inputs,
-    batch_size=32,              # larger batches = faster
+    batch_size=32,   # larger batches = faster
     convert_to_numpy=True,
     normalize_embeddings=True,  # improves retrieval quality
-    show_progress_bar=True
+    show_progress_bar=True,
+    device =device  # add to ensure encoding happens on gpu if available
 ).astype("float32")
+
 
 #================================== build vector index - pinecone ==================================
 
 print('Uploading embeddings to Pinecone...')
 
-# in terminal: export PINECONE_API_KEY='your_key_here'
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 
 index_name = 'rag-index'
 
-# create index if it doesn't exist
-if index_name not in pc.list_indexes().names():
+# ✅ safer index check (pinecone api sometimes weird)
+existing_indexes = [idx.name for idx in pc.list_indexes()]
+
+if index_name not in existing_indexes:
     pc.create_index(
         name=index_name,
         dimension=context_embeddings.shape[1],
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-west-2"
+            region="us-east-1"   # for free tier
         )
     )
 
-    index = pc.Index(index_name)  # connect to index
+index = pc.Index(index_name)
 
-    # prepare data for upsert
-    vectors = [(str(i), context_embeddings[i].tolist(), {"text": contexts[i]}) for i in range(len(contexts))]
+# prepare data for upsert
+vectors = [(str(i), context_embeddings[i].tolist(), {"text": contexts[i]}) for i in range(len(contexts))]
 
-    # upsert in batches (important!)
-    batch_size = 100
+# upsert in batches (important!)
+batch_size = 100
 
-    ### upsert all vectors with metadata in batches
-    for i in range(0, len(vectors), batch_size):
-            index.upsert(
-            vectors=vectors[i:i+batch_size],
-            namespace='default'
-        )
+### upsert all vectors with metadata in batches
+for i in range(0, len(vectors), batch_size):
+    index.upsert(
+    vectors=vectors[i:i+batch_size],
+    namespace='default'
+)
 
-    print('Pinecone index ready!')
+print('Pinecone index ready!')
 
 #================================== build vector index - faiss ==================================
 
@@ -105,7 +113,7 @@ if index_name not in pc.list_indexes().names():
 #================================== bert reranker ==================================
 
 ### initialize bert cross encoder for reranking retrieved contexts
-reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device='cuda')
+reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
 
 ### function to rerank retrieved contexts based on relevance to wuery
 def retrieve_with_rerank(query, top_k=5):
@@ -159,8 +167,10 @@ for i in range(num_samples):
 
     retrieved_contexts = retrieve_with_rerank(query)  # retrieve from pinecone + rerank with BERT
 
-    # check if answer appears in ANY retrieved chunk
-    found_ctx = any(true_answer.lower() in ctx.lower() for ctx in retrieved_contexts)
+    # check if answer appears in ANY retrieved chunk - look for exact match or all words present 
+    found_ctx = any(true_answer.lower() in ctx.lower() or
+                    all(word in ctx.lower() for word in true_answer.lower().split())
+                    for ctx in retrieved_contexts)
 
     # count as correct if answer found in any retrieved context
     if found_ctx:

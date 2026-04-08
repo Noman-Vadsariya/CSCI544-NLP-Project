@@ -24,7 +24,7 @@ faiss-cpu==1.13.2
 filelock==3.25.2
 # flash attn is optional disable if you dont support
 flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
-flashinfer-python==0.2.2+cu124torch2.6
+# flashinfer-python==0.2.2+cu124torch2.6
 frozenlist==1.8.0
 fsspec==2026.2.0
 greenlet==3.3.2
@@ -109,5 +109,9 @@ sentencepiece
 faiss-cpu
 datasets
 numpy
+tqdm
 pinecone
 torch
+transformers
+scikit-learn
+evaluate
