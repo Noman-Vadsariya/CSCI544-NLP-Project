@@ -196,9 +196,9 @@ def convert_example(ex: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     print("Downloading ASQA from Hugging Face...")
-    ds = load_dataset("din0s/asqa", split="dev")
+    ds = load_dataset("din0s/asqa", split="train")
 
-    out_path = "asqa_test.jsonl"
+    out_path = "asqa_final.jsonl"
     kept = 0
     skipped = 0
 

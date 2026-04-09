@@ -1,0 +1,63 @@
+Metadata-Version: 2.4
+Name: csci544-nlp-project
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# CSCI544-NLP-Project
+
+## Environment Setup
+
+### Option 1: Base Installation (RAG Pipeline Only)
+
+This is the lightweight setup for running the RAG baseline without the hypernetwork.
+
+#### Prerequisites
+- Python 3.10
+
+#### Installation
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-base.txt
+```
+
+---
+
+### Option 2: Full Installation (Hypernetwork + RAG)
+
+This includes everything needed to train and run the hypernetwork.
+
+#### Prerequisites
+- Python 3.10
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- CUDA 12.4 compatible GPU
+
+#### Installation
+
+1. Create and activate a virtual environment:
+```bash
+uv venv --python 3.10
+source .venv/bin/activate
+```
+
+2. Install PyTorch with CUDA 12.4 support:
+```bash
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
+3. Install the remaining dependencies:
+```bash
+uv pip install -r requirements.txt
+```
+
+> **Note:** `flash-attn` in `requirements.txt` is optional. Check if you support it.
+
+---
+
+### Testing
+- Run the following commands in the root directory to test:
+    - `pip install -e .`
+    - `python tests/test_dataset_loading.py`
+    - `python tests/test_tokenizer_chunking.py`

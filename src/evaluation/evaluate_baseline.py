@@ -6,9 +6,14 @@ import evaluate
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm 
 
-from rag_pipeline_bge import retrieve_with_rerank, queries, answers
+from datasets import load_dataset
+from standard_rag.rag_pipeline_bge import retrieve_with_rerank
 
 rouge = evaluate.load('rouge')
+
+ds = load_dataset('parquet', data_files='data/raw_datasets/combined_compact/test/ds.parquet')['train']
+queries = [ex['prompts'][0] for ex in ds]
+answers = [ex['responses'][0] for ex in ds]
 
 def normalize_answer(s):
     def remv_article(txt): return re.sub(r'\b(a|an|the)\b', ' ', txt)
@@ -18,6 +23,16 @@ def normalize_answer(s):
 
 def em_score(prediction, ground_truth):
     return int(normalize_answer(prediction) == normalize_answer(ground_truth))
+
+def f1_score(prediction, ground_truth):
+    pred_tokens = normalize_answer(prediction).split()
+    truth_tokens = normalize_answer(ground_truth).split()
+    common = set(pred_tokens) & set(truth_tokens)
+    if len(common) == 0:
+        return 0.0
+    precision = len(common) / len(pred_tokens)
+    recall = len(common) / len(truth_tokens)
+    return 2 * precision * recall / (precision + recall)
 
 def measure_system_metrics(model, inputs):
     if torch.cuda.is_available():
@@ -41,9 +56,8 @@ model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torc
 
 predictions, references, latencies, memory_usages = [], [], [], []
 
-# Using 1000 samples from dataset to ensure context matches the query
-test_queries = queries[:1000]
-test_answers = answers[:1000]
+test_queries = queries
+test_answers = answers
 
 for query, true_answer in tqdm(zip(test_queries, test_answers), total=len(test_queries)):
     references.append(true_answer)
@@ -64,9 +78,12 @@ for query, true_answer in tqdm(zip(test_queries, test_answers), total=len(test_q
 rouge_results = rouge.compute(predictions=predictions, references=references)
 em_scores = [em_score(p, r) for p, r in zip(predictions, references)]
 avg_em = sum(em_scores) / len(em_scores)
+f1_scores = [f1_score(p, r) for p, r in zip(predictions, references)]
+avg_f1 = sum(f1_scores) / len(f1_scores)
 
 print(f"\n--- Baseline RAG Results ---")
 print(f"ROUGE-L: {rouge_results['rougeL']:.4f}")
 print(f"Exact Match: {avg_em:.4f}")
+print(f"F1: {avg_f1:.4f}")
 print(f"Avg Latency per query: {sum(latencies)/len(latencies):.4f} seconds")
 print(f"Avg Peak Memory: {sum(memory_usages)/len(memory_usages):.2f} MB")

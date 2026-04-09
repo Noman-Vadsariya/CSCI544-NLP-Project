@@ -9,36 +9,36 @@
 #SBATCH --time=02:00:00          # 2 hours max runtime
 #SBATCH --output=rag_eval_%j.out # Standard output and error log
 
-# 1. PURGE AND LOAD MODULES
+
 module purge
 module load ver/2506 gcc/14.3.0 python/3.11.14 
 
-# 2. ROUTE HEAVY DOWNLOADS TO SCRATCH (CRITICAL)
-# This saves your 100GB home quota by putting the 15GB+ model in your 10TB scratch space
-export HF_HOME=/scratch1/animmaga/hf_cache
+
+
+export HF_HOME=/scratch1/$USER/hf_cache
 mkdir -p $HF_HOME
 
-# 3. SET HUGGING FACE TOKEN FOR GEMMA 2
-# REPLACE THE TEXT BELOW WITH YOUR ACTUAL TOKEN
-export HF_TOKEN="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"
+#HUGGIN FACE AND PINE CONE 
+export HF_TOKEN=$HF_TOKEN
+export PINECONE_API_KEY=$PINECONE_API_KEY
 
 which python
 
-# 4. CREATE AND ACTIVATE A VIRTUAL ENVIRONMENT
-# This builds the environment right inside your project folder
+
+
 echo "Setting up Python environment..."
 python -m venv rag_env
 source rag_env/bin/activate
 
-# 5. INSTALL REQUIREMENTS
+
 echo "Installing dependencies..."
 pip install --upgrade pip
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
-# Ensure the evaluation tools are installed
+#evaluation tools installed
 pip install evaluate rouge_score accelerate
 
-# 6. RUN THE SCRIPT
+#run script
 echo "Starting evaluation..."
 python evaluate_baseline.py
 
