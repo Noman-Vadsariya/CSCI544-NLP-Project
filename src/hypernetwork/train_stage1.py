@@ -24,6 +24,9 @@ Example (with KL + LoRA L1 regularization):
 import argparse
 import logging
 import os
+from functools import partial
+
+import numpy as np
 import wandb
 
 import torch
@@ -46,6 +49,13 @@ from ctx_to_lora.model_loading import (
 from ctx_to_lora.modeling.hypernet import (
     ModulatedPretrainedModel,
     get_hypernet_config,
+)
+from ctx_to_lora.metrics import (
+    Evaluator,
+    compute_metrics,
+    compute_per_token_acc,
+    compute_perplexity,
+    compute_prefix_matching,
 )
 from ctx_to_lora.trainer import train_model
 from ctx_to_lora.utils import compile_linear, log_num_train_params
@@ -128,6 +138,23 @@ def parse_args():
         type=int,
         default=None,
         help="Cap training samples",
+    )
+    p.add_argument(
+        "--val_dataset",
+        default=None,
+        help="Validation dataset name (default: same as --dataset)",
+    )
+    p.add_argument(
+        "--max_val_samples",
+        type=int,
+        default=200,
+        help="Max validation samples",
+    )
+    p.add_argument(
+        "--eval_steps",
+        type=int,
+        default=None,
+        help="Run validation every N steps (default: same as save_steps)",
     )
     p.add_argument(
         "--output_dir",
@@ -304,6 +331,38 @@ def main():
     )
     logger.info(f"Dataset size after packing: {len(train_ds)}")
 
+    # --- Validation dataset ---
+    val_ds_name = args.val_dataset or args.dataset
+    val_ds_raw = get_tokenized_dataset(
+        ds_name=val_ds_name,
+        split="validation",
+        max_qas_len=-1,
+        max_qas_per_sample=-1,
+        base_model_max_len=model.base_model.config.max_position_embeddings,
+        tokenizer=tokenizer,
+        ctx_model_max_len=ctx_max_pos,
+        ctx_tokenizer=ctx_tokenizer,
+        add_ctx_to_chat=False,
+        add_negative_prompt=False,
+        max_ctx_chunk_len=ctx_max_pos,
+        min_ctx_chunk_len=-1,
+        num_chunk_probs=None,
+        max_ctx_chunk_num=None,
+        use_kl_loss=args.use_kl_loss,
+    )
+
+    if val_ds_raw is None:
+        # No validation split available; fall back to a slice of training data
+        logger.info("No validation split found; using a slice of training data")
+        val_ds_raw = train_ds_raw.take(args.max_val_samples)
+        train_ds_raw = train_ds_raw.skip(args.max_val_samples)
+
+    val_indices = np.random.permutation(len(val_ds_raw))[: args.max_val_samples]
+    val_ds = val_ds_raw.select(val_indices)
+    val_ds = {val_ds_name: val_ds}
+    logger.info(f"Validation dataset size: {len(val_indices)}")
+
+    eval_steps = args.eval_steps or args.save_steps
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -315,6 +374,8 @@ def main():
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=args.save_total_limit,
+        eval_strategy="steps",
+        eval_steps=eval_steps,
         bf16=args.bf16,
         fp16=False,
         report_to="wandb" if args.wandb else "none",
@@ -340,8 +401,14 @@ def main():
         model=model,
         training_args=training_args,
         train_dataset=train_ds,
-        val_dataset=None,
+        val_dataset=val_ds,
         train_collator=flatten_if_not_packed,
+        compute_metrics=partial(
+            compute_metrics,
+            evaluator=Evaluator(
+                [compute_per_token_acc, compute_prefix_matching, compute_perplexity]
+            ),
+        ),
     )
     logger.info(f"Training complete. Saved to {args.output_dir}")
 

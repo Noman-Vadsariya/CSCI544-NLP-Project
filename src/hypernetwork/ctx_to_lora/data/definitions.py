@@ -139,6 +139,11 @@ DS_KWARGS = {
         test=dict(
             path="parquet",
             data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
+            split="validation", 
+        ) 
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
             split="test",
         )
     ),
