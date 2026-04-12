@@ -1,7 +1,7 @@
-sbatch slurm/run_gpu.sbatch src/train_stage1.py \
+sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --model_name google/gemma-2-2b-it \
   --dataset hotpotQA_compact \
-  --output_dir train_outputs/stage1_hotpot_scratch \
+  --output_dir train_outputs/stage1_hotpot_finetune \
   --num_train_epochs 5 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \
@@ -10,5 +10,10 @@ sbatch slurm/run_gpu.sbatch src/train_stage1.py \
   --logging_steps 10 \
   --bf16 \
   --wandb \
-  --ctx_encoder_type early_exit \
-  --num_blocks 8
+  --ctx_encoder_type per_layer_activations \
+  --num_blocks 9 \
+  --per_layer_processing \
+  --quantize_ctx_encoder \
+  --use_kl_loss \
+  --use_per_ctx_average_loss \
+  --gen_lora_l1_reg_coef 0.1

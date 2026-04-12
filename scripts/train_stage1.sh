@@ -1,4 +1,4 @@
-sbatch slurm/run_gpu.sbatch src/train_stage1.py \
+sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \
   --dataset hotpotQA_compact \
   --output_dir train_outputs/stage1_hotpot_finetune \
@@ -10,4 +10,8 @@ sbatch slurm/run_gpu.sbatch src/train_stage1.py \
   --logging_steps 10 \
   --bf16 \
   --wandb \
-  --num_blocks 8
+  --ctx_encoder_type per_layer_activations \
+  --num_blocks 9 \
+  --use_kl_loss \
+  --use_per_ctx_average_loss \
+  --gen_lora_l1_reg_coef 0.1
