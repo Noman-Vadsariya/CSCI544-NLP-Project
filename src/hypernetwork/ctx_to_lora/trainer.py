@@ -456,6 +456,15 @@ def train_model(
     # MONKEY PATCH: remove embedding layers from weight decay
     trainer.get_decay_parameter_names = get_decay_parameter_names
 
+    def _save_torch(output_dir=None, state_dict=None, _trainer=trainer):
+        output_dir = output_dir if output_dir is not None else _trainer.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Saving model checkpoint to {output_dir}")
+        sd = _trainer.model.state_dict() if state_dict is None else state_dict
+        torch.save(sd, os.path.join(output_dir, "pytorch_model.bin"))
+
+    trainer._save = _save_torch
+
     # Trainer loads the best model after training
     # is done when load_best_model_at_end=True
     train_result = trainer.train(resume_from_checkpoint=checkpoint)

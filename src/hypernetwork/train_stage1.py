@@ -106,7 +106,7 @@ def parse_args():
     p.add_argument(
         "--n_latent_queries",
         type=int,
-        default=208,
+        default=8,
         help="Perceiver latent queries",
     )
     p.add_argument(
@@ -118,7 +118,7 @@ def parse_args():
     p.add_argument(
         "--num_blocks",
         type=int,
-        default=9,
+        default=8,
         help="Number of perceiver blocks",
     )
     p.add_argument(
@@ -126,6 +126,16 @@ def parse_args():
         type=int,
         default=0,
         help="Number of self-attention layers per perceiver block",
+    )
+    p.add_argument(
+        "--per_layer_processing",
+        action="store_true",
+        help="Enable per-layer processing in the hypernet head",
+    )
+    p.add_argument(
+        "--quantize_ctx_encoder",
+        action="store_true",
+        help="4-bit quantize the frozen context encoder to save memory",
     )
 
     p.add_argument(
@@ -240,6 +250,7 @@ def main():
         hypernet_args = HypernetArguments(
             latent_size=args.latent_size,
             per_rank_gen=True,
+            per_layer_processing=args.per_layer_processing,
         )
         aggregator_args = AggregatorArguments(
             n_latent_queries=args.n_latent_queries,
@@ -249,6 +260,7 @@ def main():
         ctx_encoder_args = CtxEncoderArguments(
             ctx_encoder_model_name_or_path=args.ctx_encoder_model,
             ctx_encoder_type=args.ctx_encoder_type,
+            quantize_ctx_encoder=args.quantize_ctx_encoder,
         )
 
         if ctx_encoder_args.layer_idx is None:

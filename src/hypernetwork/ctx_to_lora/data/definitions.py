@@ -128,24 +128,19 @@ DS_KWARGS = {
     "hotpotQA_compact": dict(
         train=dict(
             path="parquet",
-            data_files="data/raw_datasets/hotpotQA_compact/train/ds.parquet",
-            split="train",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[200:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
-            split="validation",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[:200]",
         ),
-        test=dict(
-            path="parquet",
-            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
-            split="validation", 
-        ) 
-        test=dict(
-            path="parquet",
-            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
-            split="test",
-        )
+        # test=dict(
+        #     path="parquet",
+        #     data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
+        #     split="validation", 
+        # ) 
     ),
     "hotpotQA_gold_compact": dict(
         train=dict(
@@ -158,11 +153,11 @@ DS_KWARGS = {
             data_files="data/raw_datasets/hotpotQA_gold_compact/test/ds.parquet",
             split="validation",
         ),
-        test=dict(
-            path="parquet",
-            data_files="data/raw_datasets/hotpotQA__gold_compact/test/ds.parquet",
-            split="test",
-        )
+        # test=dict(
+        #     path="parquet",
+        #     data_files="data/raw_datasets/hotpotQA_gold_compact/test/ds.parquet",
+        #     split="test",
+        # )
     ),
     "prontoQA_compact": dict(
         train=dict(
@@ -178,6 +173,23 @@ DS_KWARGS = {
         test=dict(
             path="parquet",
             data_files="data/raw_datasets/prontoQA_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
+    "asqa_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/train/ds.parquet",
+            split="train",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/test/ds.parquet",
+            split="validation",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/test/ds.parquet",
             split="test",
         )
     ),
