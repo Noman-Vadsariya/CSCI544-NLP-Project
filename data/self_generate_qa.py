@@ -291,7 +291,7 @@ def self_generate(
             tokenized_contents["input_ids"] = [
                 truncate_middle_if_too_long(
                     ids,
-                    max_length=MODEL_CTX_LEN[args.vllm_model],
+                    max_length=MODEL_CTX_LEN[args.vllm_model] - 32,
                     max_new_tokens=args.max_new_tokens,
                 )
                 for ids in tokenized_contents["input_ids"]

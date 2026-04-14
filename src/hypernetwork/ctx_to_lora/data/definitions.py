@@ -128,12 +128,12 @@ DS_KWARGS = {
     "hotpotQA_compact": dict(
         train=dict(
             path="parquet",
-            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_compact/train/ds_*.parquet",
             split="train[200:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_compact/train/ds_*.parquet",
             split="train[:200]",
         ),
         # test=dict(
@@ -145,13 +145,13 @@ DS_KWARGS = {
     "hotpotQA_gold_compact": dict(
         train=dict(
             path="parquet",
-            data_files="data/raw_datasets/hotpotQA_gold_compact/train/ds.parquet",
-            split="train",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[200:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/hotpotQA_gold_compact/test/ds.parquet",
-            split="validation",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[:200]",
         ),
         # test=dict(
         #     path="parquet",
@@ -162,13 +162,13 @@ DS_KWARGS = {
     "prontoQA_compact": dict(
         train=dict(
             path="parquet",
-            data_files="data/raw_datasets/prontoQA_compact/train/ds.parquet",
-            split="train",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/prontoQA_compact/train/ds_*.parquet",
+            split="train[50:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/prontoQA_compact/test/ds.parquet",
-            split="validation",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/prontoQA_compact/train/ds_*.parquet",
+            split="train[:50]",
         ),
         test=dict(
             path="parquet",
@@ -179,13 +179,13 @@ DS_KWARGS = {
     "asqa_compact": dict(
         train=dict(
             path="parquet",
-            data_files="data/raw_datasets/asqa_compact/train/ds.parquet",
-            split="train",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/asqa_compact/train/ds_*.parquet",
+            split="train[200:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/asqa_compact/test/ds.parquet",
-            split="validation",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/asqa_compact/train/ds_*.parquet",
+            split="train[:200]",
         ),
         test=dict(
             path="parquet",

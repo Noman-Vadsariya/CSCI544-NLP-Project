@@ -285,9 +285,13 @@ def main():
         p.requires_grad = False
 
     # Enable gradient checkpointing to reduce activation memory
-    model.base_model.gradient_checkpointing_enable()
+    model.base_model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
     if hasattr(model.ctx_encoder, "gradient_checkpointing_enable"):
-        model.ctx_encoder.gradient_checkpointing_enable()
+        model.ctx_encoder.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
 
     if args.compile:
         model.hypernet.compile(fullgraph=True, mode="max-autotune")
