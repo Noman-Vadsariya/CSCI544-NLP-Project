@@ -18,7 +18,7 @@ contexts = []
 queries = []
 answers = []
 
-dataset_paths = glob.glob('data/raw_datasets/combined_compact/train/ds.parquet')
+dataset_paths = glob.glob('data/raw_datasets/hotpotQA_compact/train/ds.parquet')
 
 for path in dataset_paths:
     ds = load_dataset('parquet', data_files=path)['train']
@@ -60,7 +60,7 @@ print('Uploading embeddings to Pinecone...')
 # in terminal: export PINECONE_API_KEY='your_key_here'
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 
-index_name = 'rag-index'
+index_name = 'rag-index-minilm'
 
 # create index if it doesn't exist
 if index_name not in pc.list_indexes().names():
@@ -70,7 +70,7 @@ if index_name not in pc.list_indexes().names():
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-west-2"
+            region="us-east-1"
         )
     )
 
