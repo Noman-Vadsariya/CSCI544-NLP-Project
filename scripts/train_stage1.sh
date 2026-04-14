@@ -1,7 +1,7 @@
 sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \
-  --dataset hotpotQA_compact \
-  --output_dir train_outputs/stage1_hotpotqa_finetune \
+  --dataset combined_noisy_dataset \
+  --output_dir train_outputs/stage1_combined_noisy_dataset_finetune \
   --num_train_epochs 5 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \

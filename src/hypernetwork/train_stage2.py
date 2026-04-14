@@ -1,27 +1,27 @@
-"""Simplified stage 1 training: finetune hypernet on a dataset (1 chunk per context by default).
+"""Stage 2 hypernet training: multi-chunk noisy contexts.
 
-Example (from checkpoint):
-    uv run python3 src/train_stage1.py \
-        --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \
-        --dataset squad_compact \
-        --output_dir train_outputs/stage1_run
+Stage 2 fine-tunes the hypernetwork on contexts split into multiple retrieval
+chunks, so it learns to aggregate longer and noisier evidence than stage 1
+(which trains with a single chunk per context).
+
+Example (from a stage 1 checkpoint):
+    uv run python3 src/hypernetwork/train_stage2.py \
+        --checkpoint train_outputs/stage1_combined_noisy_dataset_finetune/checkpoint-20000/pytorch_model.bin \
+        --dataset combined_noisy_dataset \
+        --output_dir train_outputs/stage2_run \
+        --use_kl_loss \
+        --use_per_ctx_average_loss \
+        --gen_lora_l1_reg_coef 0.1
 
 Example (from scratch with a base model):
-    uv run python3 src/train_stage1.py \
+    uv run python3 src/hypernetwork/train_stage2.py \
         --model_name google/gemma-2-2b-it \
-        --dataset squad_compact \
-        --output_dir train_outputs/stage1_scratch
-
-Example (with KL + LoRA L1 regularization):
-    uv run python3 src/train_stage1.py \
-        --model_name google/gemma-2-2b-it \
-        --dataset hotpotQA_compact \
-        --output_dir train_outputs/stage1_hotpot_scratch \
-        --use_kl_loss \
-        --gen_lora_l1_reg_coef 1e-4
+        --dataset combined_noisy_dataset \
+        --output_dir train_outputs/stage2_scratch
 """
 
 import argparse
+import json
 import logging
 import os
 from functools import partial
@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Stage 1 hypernet training")
+    p = argparse.ArgumentParser(description="Stage 2 hypernet training (multi-chunk)")
 
     # Model either from --checkpoint OR --model_name (from scratch)
     source = p.add_mutually_exclusive_group(required=True)
@@ -141,7 +141,7 @@ def parse_args():
     p.add_argument(
         "--dataset",
         required=True,
-        help="Dataset name (e.g. squad_compact, pwc_compact)",
+        help="Dataset name (e.g. squad_compact, combined_noisy_dataset)",
     )
     p.add_argument(
         "--max_train_samples",
@@ -168,7 +168,7 @@ def parse_args():
     )
     p.add_argument(
         "--output_dir",
-        default="train_outputs/stage1",
+        default="train_outputs/stage2",
         help="Output directory",
     )
     p.add_argument("--num_train_epochs", type=int, default=3)
@@ -180,9 +180,35 @@ def parse_args():
     p.add_argument("--warmup_ratio", type=float, default=0.03)
     p.add_argument("--seed", type=int, default=42)
 
-    # Packing
-    p.add_argument("--max_packed_inp_len", type=int, default=4096)
-    p.add_argument("--max_packed_ctx_len", type=int, default=4096)
+    # Packing (smaller than stage 1 because multi-chunk samples are longer)
+    p.add_argument("--max_packed_inp_len", type=int, default=1024)
+    p.add_argument("--max_packed_ctx_len", type=int, default=2048)
+
+    # Context chunking (stage 2: multi-chunk noisy contexts)
+    p.add_argument(
+        "--max_ctx_chunk_len",
+        type=int,
+        default=512,
+        help="Max tokens per context chunk",
+    )
+    p.add_argument(
+        "--min_ctx_chunk_len",
+        type=int,
+        default=25,
+        help="Min tokens per chunk when using random chunk count",
+    )
+    p.add_argument(
+        "--num_chunk_probs",
+        type=str,
+        default='{"1":0.5,"2":0.125,"3":0.0625,"4":0.0625,"5":0.0625,"6":0.0625,"7":0.0625,"8":0.0625}',
+        help="JSON dict of {num_chunks: prob} sampled per training example",
+    )
+    p.add_argument(
+        "--max_ctx_chunk_num",
+        type=int,
+        default=None,
+        help="Hard cap on chunks per context (None = no cap)",
+    )
 
     # Loss / regularization controls
     p.add_argument(
@@ -214,6 +240,11 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
+
+    if args.num_chunk_probs is not None:
+        args.num_chunk_probs = {
+            int(k): float(v) for k, v in json.loads(args.num_chunk_probs).items()
+        }
 
     if args.checkpoint:
         logger.info(f"Loading checkpoint: {args.checkpoint}")
@@ -325,10 +356,10 @@ def main():
         ctx_tokenizer=ctx_tokenizer,
         add_ctx_to_chat=False,
         add_negative_prompt=False,
-        max_ctx_chunk_len=ctx_max_pos,  # no chunking: chunk_len = max_pos
-        min_ctx_chunk_len=-1,
-        num_chunk_probs=None,
-        max_ctx_chunk_num=None,
+        max_ctx_chunk_len=args.max_ctx_chunk_len,
+        min_ctx_chunk_len=args.min_ctx_chunk_len,
+        num_chunk_probs=args.num_chunk_probs,
+        max_ctx_chunk_num=args.max_ctx_chunk_num,
         use_kl_loss=args.use_kl_loss,
     )
 
@@ -347,7 +378,7 @@ def main():
     )
     logger.info(f"Dataset size after packing: {len(train_ds)}")
 
-    # Validation dataset 
+    # Validation dataset
     val_ds_name = args.val_dataset or args.dataset
     val_ds_raw = get_tokenized_dataset(
         ds_name=val_ds_name,
@@ -360,10 +391,10 @@ def main():
         ctx_tokenizer=ctx_tokenizer,
         add_ctx_to_chat=False,
         add_negative_prompt=False,
-        max_ctx_chunk_len=ctx_max_pos,
-        min_ctx_chunk_len=-1,
-        num_chunk_probs=None,
-        max_ctx_chunk_num=None,
+        max_ctx_chunk_len=args.max_ctx_chunk_len,
+        min_ctx_chunk_len=args.min_ctx_chunk_len,
+        num_chunk_probs=args.num_chunk_probs,
+        max_ctx_chunk_num=args.max_ctx_chunk_num,
         use_kl_loss=args.use_kl_loss,
     )
 
