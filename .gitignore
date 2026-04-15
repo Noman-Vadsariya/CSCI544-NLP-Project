@@ -6,3 +6,6 @@ slurm_logs/
 wandb/
 train_outputs
 .env
+__pycache__
+google/
+test.py
