@@ -26,7 +26,7 @@ print("Total contexts:", len(contexts))
 
 
 ### chunking
-def chunk_text(text, chunk_size=200, overlap=50):
+def chunk_text(text, chunk_size=512, overlap=50):
     words = text.split()
     chunks = []
 
