@@ -30,9 +30,9 @@ if __name__ == "__main__":
         for i, sample in tqdm(enumerate(ds)):
             gold_titles = Counter(sample["supporting_facts"]["title"])
             sentences = []
-            for title, sent in zip(sample["context"]["title"], sample["context"]["sentences"][0]):
+            for title, sent in zip(sample["context"]["title"], sample["context"]["sentences"]):
                 if title in gold_titles:
-                    sentences.append(sent)
+                    sentences.extend(sent)
 
             response = sample["answer"]
             ctx = "\n".join(sentences)
