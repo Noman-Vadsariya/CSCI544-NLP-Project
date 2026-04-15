@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from datasets import load_dataset
 from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer
+from rank_bm25 import BM25Okapi   
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
@@ -27,9 +28,9 @@ print("Total contexts:", len(contexts))
 
 
 ### chunking
-tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-base-en-v1.5")
+tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
-def chunk_text(text, chunk_size=480, overlap=50):
+def chunk_text(text, chunk_size=480, overlap=80):
     tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
     chunks = []
 
@@ -51,6 +52,11 @@ for i, c in enumerate(contexts):
     chunk_id_to_original.extend([i] * len(chunks))
 
 print("Total chunked contexts:", len(chunked_contexts))
+
+
+### bm25 index
+tokenized_corpus = [c.lower().split() for c in chunked_contexts]
+bm25 = BM25Okapi(tokenized_corpus)
 
 
 ### embeddings
@@ -75,7 +81,7 @@ context_embeddings = model.encode(
 
 ### pinecone
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index_name = "rag-index"
+index_name = "rag-index-v2"
 
 existing_indexes = [idx.name for idx in pc.list_indexes()]
 
@@ -93,7 +99,6 @@ if index_name not in existing_indexes:
 
 index = pc.Index(index_name)
 
-# set to True once after adding chunking
 UPLOAD_EMBEDDINGS = True
 
 if UPLOAD_EMBEDDINGS:
@@ -122,12 +127,14 @@ if UPLOAD_EMBEDDINGS:
 else:
     print("Using existing Pinecone index...")
 
+
 ### reranker
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
+
 def retrieve_contexts(query, top_k=5):
     query_embedding = model.encode(
-        ["query: " + query],
+        ["query: " + query + " passage:"],   
         normalize_embeddings=True,
         convert_to_numpy=True,
         device=device,
@@ -142,15 +149,37 @@ def retrieve_contexts(query, top_k=5):
 
     return [match["metadata"]["text"] for match in results["matches"]]
 
+
+### bm25 retrieval
+def retrieve_bm25(query, top_k=10):
+    tokenized_query = query.lower().split()
+    scores = bm25.get_scores(tokenized_query)
+
+    top_indices = sorted(
+        range(len(scores)),
+        key=lambda i: scores[i],
+        reverse=True
+    )[:top_k]
+
+    return [chunked_contexts[i] for i in top_indices]
+
+
 def retrieve_with_rerank(query, top_k=5):
-    candidates = retrieve_contexts(query, top_k=10)
+    dense_candidates = retrieve_contexts(query, top_k=30)
+    bm25_candidates = retrieve_bm25(query, top_k=30)
+
+    # combine + deduplicate
+    candidates = list(set(dense_candidates + bm25_candidates))
+
     pairs = [[query, ctx] for ctx in candidates]
     scores = reranker.predict(pairs)
+
     ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+
     return [ctx for ctx, _ in ranked[:top_k]]
 
 
-### eval - exact match or all words present in retrieved context
+### eval
 num_correct = 0
 num_samples = min(200, len(queries))
 
@@ -158,7 +187,7 @@ for i in range(num_samples):
     query = queries[i]
     true_answer = answers[i]
 
-    retrieved_contexts = retrieve_with_rerank(query, top_k=5)
+    retrieved_contexts = retrieve_with_rerank(query, top_k=10)
 
     found_ctx = any(
         true_answer.lower() in ctx.lower()
