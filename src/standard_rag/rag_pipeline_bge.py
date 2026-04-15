@@ -2,7 +2,7 @@
 
 import os
 import glob
-import faiss
+# import faiss
 import torch    
 
 from sentence_transformers import SentenceTransformer
@@ -18,7 +18,7 @@ contexts = []
 queries = []
 answers = []
 
-dataset_paths = glob.glob('data/raw_datasets/combined_compact/test/ds.parquet')
+dataset_paths = glob.glob('data/raw_datasets/hotpotQA_compact/test/ds.parquet')
 
 for path in dataset_paths:
     ds = load_dataset('parquet', data_files=path)['train']
@@ -72,7 +72,7 @@ if index_name not in pc.list_indexes().names():
         metric="cosine",
         spec=ServerlessSpec(
             cloud="aws",
-            region="us-west-2"
+            region="us-east-1"
         )
     )
 
