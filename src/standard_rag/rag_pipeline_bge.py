@@ -1,4 +1,4 @@
-##### BGE encoder version
+##### BGE encoder version (with chunking)
 
 import os
 import torch
@@ -11,9 +11,7 @@ from pinecone import Pinecone, ServerlessSpec
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
 
-# load data
-
-path = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/data/raw_datasets/hotpotQA_compact/test/ds.parquet"
+path = "data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 ds = load_dataset("parquet", data_files=path)["train"]
 
 print("num rows:", len(ds))
@@ -26,7 +24,32 @@ answers = [x[0] for x in ds["responses"]]
 print("Total QA pairs:", len(queries))
 print("Total contexts:", len(contexts))
 
-# embeddings 
+
+### chunking
+def chunk_text(text, chunk_size=200, overlap=50):
+    words = text.split()
+    chunks = []
+
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk)
+
+    return chunks
+
+
+chunked_contexts = []
+chunk_id_to_original = []
+
+for i, c in enumerate(contexts):
+    chunks = chunk_text(c)
+    chunked_contexts.extend(chunks)
+    chunk_id_to_original.extend([i] * len(chunks))
+
+print("Total chunked contexts:", len(chunked_contexts))
+
+
+### embeddings
 torch.set_num_threads(1)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -34,7 +57,7 @@ print(f"Using device: {device}")
 
 model = SentenceTransformer("BAAI/bge-base-en-v1.5", device=device)
 
-context_inputs = ["passage: " + c for c in contexts]
+context_inputs = ["passage: " + c for c in chunked_contexts]
 
 context_embeddings = model.encode(
     context_inputs,
@@ -45,8 +68,8 @@ context_embeddings = model.encode(
     device=device,
 ).astype("float32")
 
-# build / connect pinecone
 
+### pinecone
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index_name = "rag-index"
 
@@ -66,15 +89,22 @@ if index_name not in existing_indexes:
 
 index = pc.Index(index_name)
 
-# set this to False after the first successful upload
-UPLOAD_EMBEDDINGS = False
+# set to True once after adding chunking
+UPLOAD_EMBEDDINGS = True
 
 if UPLOAD_EMBEDDINGS:
     print("Uploading embeddings to Pinecone...")
 
     vectors = [
-        (str(i), context_embeddings[i].tolist(), {"text": contexts[i]})
-        for i in range(len(contexts))
+        (
+            str(i),
+            context_embeddings[i].tolist(),
+            {
+                "text": chunked_contexts[i],
+                "original_id": chunk_id_to_original[i]
+            }
+        )
+        for i in range(len(chunked_contexts))
     ]
 
     batch_size = 100
@@ -88,8 +118,7 @@ if UPLOAD_EMBEDDINGS:
 else:
     print("Using existing Pinecone index...")
 
-# bert reranker
-
+### reranker
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 def retrieve_contexts(query, top_k=5):
@@ -116,8 +145,8 @@ def retrieve_with_rerank(query, top_k=5):
     ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
     return [ctx for ctx, _ in ranked[:top_k]]
 
-# test retrieval
 
+### eval - exact match or all words present in retrieved context
 num_correct = 0
 num_samples = min(200, len(queries))
 
