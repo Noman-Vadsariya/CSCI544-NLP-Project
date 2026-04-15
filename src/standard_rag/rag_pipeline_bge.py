@@ -11,7 +11,7 @@ from pinecone import Pinecone, ServerlessSpec
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
 
-path = "data/raw_datasets/hotpotQA_compact/test/ds.parquet"
+path = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 ds = load_dataset("parquet", data_files=path)["train"]
 
 print("num rows:", len(ds))
