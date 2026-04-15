@@ -29,8 +29,8 @@ print("Total contexts:", len(contexts))
 ### chunking
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-base-en-v1.5")
 
-def chunk_text(text, chunk_size=512, overlap=50):
-    tokens = tokenizer.encode(text, add_special_tokens=False)
+def chunk_text(text, chunk_size=480, overlap=50):
+    tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
     chunks = []
 
     for i in range(0, len(tokens), chunk_size - overlap):
