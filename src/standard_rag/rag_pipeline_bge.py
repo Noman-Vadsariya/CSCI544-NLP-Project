@@ -151,7 +151,7 @@ def retrieve_contexts(query, top_k=5):
 
 
 ### bm25 retrieval
-def retrieve_bm25(query, top_k=10):
+def retrieve_bm25(query, top_k=50):
     tokenized_query = query.lower().split()
     scores = bm25.get_scores(tokenized_query)
 
@@ -165,8 +165,8 @@ def retrieve_bm25(query, top_k=10):
 
 
 def retrieve_with_rerank(query, top_k=5):
-    dense_candidates = retrieve_contexts(query, top_k=30)
-    bm25_candidates = retrieve_bm25(query, top_k=30)
+    dense_candidates = retrieve_contexts(query, top_k=50)
+    bm25_candidates = retrieve_bm25(query, top_k=50)
 
     # combine + deduplicate
     candidates = list(set(dense_candidates + bm25_candidates))
