@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from datasets import load_dataset
 from pinecone import Pinecone, ServerlessSpec
+from transformers import AutoTokenizer
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
@@ -26,17 +27,20 @@ print("Total contexts:", len(contexts))
 
 
 ### chunking
+tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-base-en-v1.5")
+
 def chunk_text(text, chunk_size=512, overlap=50):
-    words = text.split()
+    tokens = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
 
-    for i in range(0, len(words), chunk_size - overlap):
-        chunk = " ".join(words[i:i + chunk_size])
+    for i in range(0, len(tokens), chunk_size - overlap):
+        chunk_tokens = tokens[i:i + chunk_size]
+        chunk = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
+
         if chunk.strip():
             chunks.append(chunk)
 
     return chunks
-
 
 chunked_contexts = []
 chunk_id_to_original = []
