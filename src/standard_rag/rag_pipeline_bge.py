@@ -63,6 +63,7 @@ torch.set_num_threads(1)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
+model.max_seq_length = 512 
 
 context_inputs = chunked_contexts
 
@@ -72,8 +73,6 @@ context_embeddings = model.encode(
     convert_to_numpy=True,
     normalize_embeddings=True,
     show_progress_bar=True,
-    truncate_dim=None, 
-    max_length=512,   # ensure we dont exceed model limits
 ).astype("float32")
 
 
