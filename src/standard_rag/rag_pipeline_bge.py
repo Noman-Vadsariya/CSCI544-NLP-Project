@@ -1,7 +1,8 @@
-##### BGE encoder version (with chunking)
+##### BGE encoder version (with chunking + simple query decomposition)
 
 import os
 import torch
+import random
 
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer, CrossEncoder
@@ -31,9 +32,9 @@ print("Total contexts:", len(contexts))
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
 def chunk_text(text, chunk_size=480, overlap=80):
-    tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
-    chunks = []
+    tokens = tokenizer.encode(text, add_special_tokens=False)
 
+    chunks = []
     for i in range(0, len(tokens), chunk_size - overlap):
         chunk_tokens = tokens[i:i + chunk_size]
         chunk = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
@@ -42,6 +43,7 @@ def chunk_text(text, chunk_size=480, overlap=80):
             chunks.append(chunk)
 
     return chunks
+
 
 chunked_contexts = []
 chunk_id_to_original = []
@@ -132,9 +134,36 @@ else:
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 
-def retrieve_contexts(query, top_k=5):
+### simple query decomposition
+def decompose_query(query):
+    query_lower = query.lower()
+    subqueries = [query]
+
+    if " of " in query:
+        subqueries.append(query.split(" of ")[-1].strip())
+
+    if " in " in query:
+        subqueries.append(query.split(" in ")[-1].strip())
+
+    if "who is" in query_lower:
+        subqueries.append(query_lower.replace("who is", "").strip())
+
+    if "what is" in query_lower:
+        subqueries.append(query_lower.replace("what is", "").strip())
+
+    if "where was" in query_lower or "where is" in query_lower:
+        subqueries.append(
+            query_lower.replace("where was", "")
+                       .replace("where is", "")
+                       .strip()
+        )
+
+    return list(set([q for q in subqueries if len(q) > 3]))
+
+
+def retrieve_contexts(query, top_k=15):
     query_embedding = model.encode(
-        ["query: " + query + " passage:"],   
+        ["query: " + query + " passage:"],
         normalize_embeddings=True,
         convert_to_numpy=True,
         device=device,
@@ -151,7 +180,7 @@ def retrieve_contexts(query, top_k=5):
 
 
 ### bm25 retrieval
-def retrieve_bm25(query, top_k=50):
+def retrieve_bm25(query, top_k=10):
     tokenized_query = query.lower().split()
     scores = bm25.get_scores(tokenized_query)
 
@@ -164,12 +193,28 @@ def retrieve_bm25(query, top_k=50):
     return [chunked_contexts[i] for i in top_indices]
 
 
-def retrieve_with_rerank(query, top_k=5):
-    dense_candidates = retrieve_contexts(query, top_k=50)
-    bm25_candidates = retrieve_bm25(query, top_k=50)
+### rerank
+def retrieve_with_rerank(query, top_k=10):
+    subqueries = decompose_query(query)
+
+    dense_candidates = []
+    bm25_candidates = []
+
+    for q in subqueries:
+        dense_candidates += retrieve_contexts(q)
+        bm25_candidates += retrieve_bm25(q)
 
     # combine + deduplicate
     candidates = list(set(dense_candidates + bm25_candidates))
+
+    # shuffle before slicing 
+    random.shuffle(candidates)
+
+    MAX_CANDIDATES = 60
+    candidates = candidates[:MAX_CANDIDATES]
+
+    # optional debug
+    print(f"#subqueries: {len(subqueries)} | #candidates: {len(candidates)}")
 
     pairs = [[query, ctx] for ctx in candidates]
     scores = reranker.predict(pairs)
@@ -201,7 +246,7 @@ for i in range(num_samples):
     print("\n-------------------------------")
     print("Query:", query)
     print("True Answer:", true_answer)
-    print("Found in top 5:", found_ctx)
+    print("Found in top 10:", found_ctx)
 
 accuracy = num_correct / num_samples if num_samples > 0 else 0.0
-print(f"\nRetrieval Accuracy@5: {accuracy:.4f}")
+print(f"\nRetrieval Accuracy@10: {accuracy:.4f}")
