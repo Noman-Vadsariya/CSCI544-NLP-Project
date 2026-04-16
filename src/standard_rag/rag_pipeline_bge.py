@@ -1,4 +1,4 @@
-##### BGE-Large + Hybrid Retrieval + GPT-4o-mini ONLY + Better Reranker + MRR
+##### BGE-Large + Hybrid Retrieval + GPT-4o-mini ONLY + MiniLM Reranker + MRR (FIXED)
 
 import os
 import torch
@@ -46,66 +46,78 @@ def chunk_text(text, chunk_size=270, overlap=60):
 
 
 chunked_contexts = []
-
 for c in contexts:
     chunked_contexts.extend(chunk_text(c))
 
 print("Total chunked contexts:", len(chunked_contexts))
 
+print("Total chunked contexts:", len(chunked_contexts))
+
+# check
+too_long = [c for c in chunked_contexts if len(tokenizer.encode(c)) > 512]
+print("Chunks over 512 tokens:", len(too_long))
 
 ### BM25
 tokenized_corpus = [c.lower().split() for c in chunked_contexts]
 bm25 = BM25Okapi(tokenized_corpus)
 
 
-### embeddings
-torch.set_num_threads(1)
-device = "cuda" if torch.cuda.is_available() else "cpu"
+### embeddings + pinecone (MEMORY SAFE)
 
-model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
-model.max_seq_length = 512 
-
-context_inputs = chunked_contexts
-
-context_embeddings = model.encode(
-    context_inputs,
-    batch_size=32,
-    convert_to_numpy=True,
-    normalize_embeddings=True,
-    show_progress_bar=True,
-).astype("float32")
-
-
-### pinecone
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index_name = "rag-index-v5"
+index_name = "rag-index-v6"
 
 if index_name not in [idx.name for idx in pc.list_indexes()]:
     pc.create_index(
         name=index_name,
-        dimension=context_embeddings.shape[1],
+        dimension=1024,  # BGE-large embedding size
         metric="cosine",
         spec=ServerlessSpec(cloud="aws", region="us-east-1"),
     )
 
 index = pc.Index(index_name)
 
-UPLOAD_EMBEDDINGS = True
+batch_size = 64  # smaller= safer
 
-if UPLOAD_EMBEDDINGS:
+print("Embedding + uploading in batches...")
+
+for i in range(0, len(chunked_contexts), batch_size):
+
+    batch_texts = chunked_contexts[i:i+batch_size]
+
+    batch_embeddings = model.encode(
+        batch_texts,
+        batch_size=32,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    ).astype("float32")
+
     vectors = [
-        (str(i), context_embeddings[i].tolist(), {"text": chunked_contexts[i]})
-        for i in range(len(chunked_contexts))
+        (
+            str(i + j),
+            batch_embeddings[j].tolist(),
+            {"text": batch_texts[j]}
+        )
+        for j in range(len(batch_texts))
     ]
 
-    for i in range(0, len(vectors), 100):
-        index.upsert(vectors=vectors[i:i+100], namespace="default")
+    index.upsert(vectors=vectors, namespace="default")
+
+    # free up memory
+    del batch_embeddings
+    del vectors
+
+    if i % 500 == 0:
+        print(f"Processed {i} / {len(chunked_contexts)}")
+
+print("Pinecone upload complete!")
 
 
-### reranker
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
+### reranker (MiniLM)
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device="cpu")
 
-### GPT-4o-mini decomposition ONLY (with retries)
+
+### GPT-4o-mini decomposition
 def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -139,7 +151,7 @@ Return ONLY the queries, one per line.
             print(f"Retry {attempt+1} failed:", e)
             time.sleep(1)
 
-    raise RuntimeError("LLM decomposition failed after retries")
+    raise RuntimeError("LLM decomposition failed")
 
 
 ### retrieval
@@ -166,9 +178,8 @@ def retrieve_bm25(query, top_k=10):
     return [chunked_contexts[i] for i in top_idx]
 
 
-def retrieve_with_rerank(query, top_k=10):
-    subqueries = decompose_query_llm(query)
-
+### IMPORTANT: pass subqueries (no double LLM calls)
+def retrieve_with_rerank(query, subqueries, top_k=10):
     dense, sparse = [], []
 
     for q in subqueries:
@@ -198,8 +209,7 @@ def compute_mrr(ranked, answer):
 ### eval
 num_correct = 0
 mrr_total = 0
-num_samples = 300  # try 300 first 
-# num_samples = min(200, len(queries))
+num_samples = 300
 
 for i in range(num_samples):
     q = queries[i]
@@ -212,7 +222,7 @@ for i in range(num_samples):
         print("Query:", q)
         print("Subqueries:", subqueries)
 
-    retrieved = retrieve_with_rerank(q, top_k=10)
+    retrieved = retrieve_with_rerank(q, subqueries, top_k=10)
 
     found = any(ans.lower() in ctx.lower() for ctx in retrieved)
 
@@ -221,7 +231,8 @@ for i in range(num_samples):
 
     mrr_total += compute_mrr(retrieved, ans)
 
-    time.sleep(0.05)  # prevent rate limits
+    time.sleep(0.05)
+
 
 accuracy = num_correct / num_samples
 mrr = mrr_total / num_samples
