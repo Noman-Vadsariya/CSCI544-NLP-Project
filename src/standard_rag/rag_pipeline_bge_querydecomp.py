@@ -1,4 +1,4 @@
-##### BGE-Large + Hybrid Retrieval + NO Decomposition + MiniLM Reranker + MRR
+##### BGE-Large + Hybrid Retrieval + GPT-4o-mini + MiniLM Reranker + MRR (WITH PROGRESS BARS)
 
 import os
 import torch
@@ -12,10 +12,13 @@ from datasets import load_dataset
 from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer
 from rank_bm25 import BM25Okapi
+from openai import OpenAI
 from tqdm import tqdm  
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 path = "/home1/vuvaness/CSCI544-NLP-Project/data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 ds = load_dataset("parquet", data_files=path)["train"]
@@ -82,12 +85,98 @@ if index_name not in [idx.name for idx in pc.list_indexes()]:
 index = pc.Index(index_name)
 
 
-### upload embeddings (already done)
-UPLOAD_EMBEDDINGS = False
+### upload embeddings
+UPLOAD_EMBEDDINGS = False  # already uploaded  
+
+if UPLOAD_EMBEDDINGS:
+    print("Embedding + uploading in batches...")
+
+    batch_size = 64
+
+    for i in tqdm(range(0, len(chunked_contexts), batch_size), desc="Embedding Progress"):
+
+        batch_texts = chunked_contexts[i:i+batch_size]
+
+        batch_embeddings = model.encode(
+            batch_texts,
+            batch_size=16,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        ).astype("float32")
+
+        vectors = [
+            (
+                str(i + j),
+                batch_embeddings[j].tolist(),
+                {"text": batch_texts[j]}
+            )
+            for j in range(len(batch_texts))
+        ]
+
+        index.upsert(vectors=vectors, namespace="default")
+
+        del batch_embeddings
+        del vectors
+        gc.collect()
+
+    print("Pinecone upload complete!")
 
 
 ### reranker
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
+
+
+### LLM query decomposition
+def decompose_query_llm(query, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            prompt = f"""
+You are helping a retrieval system for multi-hop question answering.
+
+Given a question, generate 1 to 3 short search queries that help retrieve the key facts needed to answer it.
+
+Rules:
+- Always include the original question as one of the queries
+- Keep important entity names exactly as they appear
+- Do NOT make vague or generic queries
+- Each query should capture a distinct piece of information
+- If the question is simple, return ONLY the original question
+- Avoid rewording the same query multiple ways
+
+Question:
+{query}
+
+Return ONLY the queries, one per line.
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+
+            text = response.choices[0].message.content.strip()
+
+            subqueries = [
+                line.strip("- ").strip()
+                for line in text.split("\n")
+                if len(line.strip()) > 3
+            ]
+
+            if query not in subqueries:
+                subqueries.append(query)
+
+            # remove duplicates
+            subqueries = list(set(subqueries))
+
+            if len(subqueries) > 0:
+                return subqueries
+
+        except Exception as e:
+            print(f"Retry {attempt+1} failed:", e)
+            time.sleep(1)
+
+    raise RuntimeError("LLM decomposition failed")
 
 
 ### retrieval
@@ -114,14 +203,17 @@ def retrieve_bm25(query, top_k=10):
     return [chunked_contexts[i] for i in top_idx]
 
 
-### rerank (same function, but only one query)
-def retrieve_with_rerank(query, top_k=10):
-    dense = retrieve_contexts(query)
-    sparse = retrieve_bm25(query)
+### rerank
+def retrieve_with_rerank(query, subqueries, top_k=10):
+    dense, sparse = [], []
+
+    for q in subqueries:
+        dense += retrieve_contexts(q)
+        sparse += retrieve_bm25(q)
 
     candidates = list(set(dense + sparse))
     random.shuffle(candidates)
-    candidates = candidates[:50]
+    candidates = candidates[:30]
 
     pairs = [[query, c] for c in candidates]
     scores = reranker.predict(pairs)
@@ -142,7 +234,7 @@ def compute_mrr(ranked, answer):
 ### eval
 num_correct = 0
 mrr_total = 0
-num_samples = len(queries)  # test on all samples
+num_samples = 500  # test
 
 print("\nRunning evaluation...")
 
@@ -151,7 +243,9 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
     q = queries[i]
     ans = answers[i]
 
-    retrieved = retrieve_with_rerank(q, top_k=10)
+    subqueries = decompose_query_llm(q)
+
+    retrieved = retrieve_with_rerank(q, subqueries, top_k=10)
 
     found = any(ans.lower() in ctx.lower() for ctx in retrieved)
 
