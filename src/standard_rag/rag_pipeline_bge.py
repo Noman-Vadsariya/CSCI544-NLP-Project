@@ -9,6 +9,8 @@ from datasets import load_dataset
 from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer
 from rank_bm25 import BM25Okapi   
+from tqdm import tqdm
+
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
@@ -183,7 +185,10 @@ def retrieve_with_rerank(query, top_k=5):
 num_correct = 0
 num_samples = min(200, len(queries))
 
-for i in range(num_samples):
+print("\nRunning evaluation...")
+
+for i in tqdm(range(num_samples), desc="Eval Progress"):
+
     query = queries[i]
     true_answer = answers[i]
 
@@ -198,10 +203,6 @@ for i in range(num_samples):
     if found_ctx:
         num_correct += 1
 
-    print("\n-------------------------------")
-    print("Query:", query)
-    print("True Answer:", true_answer)
-    print("Found in top 5:", found_ctx)
 
 accuracy = num_correct / num_samples if num_samples > 0 else 0.0
-print(f"\nRetrieval Accuracy@5: {accuracy:.4f}")
+print(f"\nRetrieval Accuracy: {accuracy:.4f}")
