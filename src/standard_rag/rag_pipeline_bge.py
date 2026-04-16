@@ -102,8 +102,7 @@ if UPLOAD_EMBEDDINGS:
 
 
 ### reranker
-reranker = CrossEncoder("BAAI/bge-reranker-large", device=device)
-
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 ### GPT-4o-mini decomposition ONLY (with retries)
 def decompose_query_llm(query, max_retries=3):
