@@ -1,4 +1,4 @@
-##### BGE-Large + Hybrid Retrieval + GPT-4o-mini + MiniLM Reranker + MRR (FINAL)
+##### BGE-Large + Hybrid Retrieval + GPT-4o-mini + MiniLM Reranker + MRR (WITH PROGRESS BARS)
 
 import os
 import torch
@@ -13,6 +13,7 @@ from pinecone import Pinecone, ServerlessSpec
 from transformers import AutoTokenizer
 from rank_bm25 import BM25Okapi
 from openai import OpenAI
+from tqdm import tqdm  
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv()
@@ -52,7 +53,6 @@ for c in contexts:
 
 print("Total chunked contexts:", len(chunked_contexts))
 
-# sanity check
 too_long = [c for c in chunked_contexts if len(tokenizer.encode(c)) > 512]
 print("Chunks over 512 tokens:", len(too_long))
 
@@ -65,6 +65,7 @@ bm25 = BM25Okapi(tokenized_corpus)
 ### embedding model
 torch.set_num_threads(1)
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print("Using device:", device)
 
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 
@@ -84,15 +85,15 @@ if index_name not in [idx.name for idx in pc.list_indexes()]:
 index = pc.Index(index_name)
 
 
-### upload embeddings 
-UPLOAD_EMBEDDINGS = True  
+### upload embeddings
+UPLOAD_EMBEDDINGS = False  # already uploaded  
 
 if UPLOAD_EMBEDDINGS:
     print("Embedding + uploading in batches...")
 
     batch_size = 64
 
-    for i in range(0, len(chunked_contexts), batch_size):
+    for i in tqdm(range(0, len(chunked_contexts), batch_size), desc="Embedding Progress"):
 
         batch_texts = chunked_contexts[i:i+batch_size]
 
@@ -114,13 +115,9 @@ if UPLOAD_EMBEDDINGS:
 
         index.upsert(vectors=vectors, namespace="default")
 
-        # free memory
         del batch_embeddings
         del vectors
         gc.collect()
-
-        if i % 500 == 0:
-            print(f"Processed {i} / {len(chunked_contexts)}")
 
     print("Pinecone upload complete!")
 
@@ -200,7 +197,7 @@ def retrieve_with_rerank(query, subqueries, top_k=10):
 
     candidates = list(set(dense + sparse))
     random.shuffle(candidates)
-    candidates = candidates[:60]
+    candidates = candidates[:30]
 
     pairs = [[query, c] for c in candidates]
     scores = reranker.predict(pairs)
@@ -221,18 +218,16 @@ def compute_mrr(ranked, answer):
 ### eval
 num_correct = 0
 mrr_total = 0
-num_samples = 300
+num_samples = 100  # test
 
-for i in range(num_samples):
+print("\nRunning evaluation...")
+
+for i in tqdm(range(num_samples), desc="Eval Progress"):
+
     q = queries[i]
     ans = answers[i]
 
     subqueries = decompose_query_llm(q)
-
-    if i < 5:
-        print("\n--- DEBUG ---")
-        print("Query:", q)
-        print("Subqueries:", subqueries)
 
     retrieved = retrieve_with_rerank(q, subqueries, top_k=10)
 
