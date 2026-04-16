@@ -1,9 +1,10 @@
-##### BGE-Large + Hybrid Retrieval + GPT-4o-mini ONLY + MiniLM Reranker + MRR (FIXED)
+##### BGE-Large + Hybrid Retrieval + GPT-4o-mini + MiniLM Reranker + MRR (FINAL)
 
 import os
 import torch
 import random
 import time
+import gc
 
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer, CrossEncoder
@@ -51,73 +52,84 @@ for c in contexts:
 
 print("Total chunked contexts:", len(chunked_contexts))
 
-print("Total chunked contexts:", len(chunked_contexts))
-
-# check
+# sanity check
 too_long = [c for c in chunked_contexts if len(tokenizer.encode(c)) > 512]
 print("Chunks over 512 tokens:", len(too_long))
+
 
 ### BM25
 tokenized_corpus = [c.lower().split() for c in chunked_contexts]
 bm25 = BM25Okapi(tokenized_corpus)
 
 
-### embeddings + pinecone (MEMORY SAFE)
+### embedding model
+torch.set_num_threads(1)
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
+model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
+
+
+### Pinecone setup
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index_name = "rag-index-v6"
 
 if index_name not in [idx.name for idx in pc.list_indexes()]:
     pc.create_index(
         name=index_name,
-        dimension=1024,  # BGE-large embedding size
+        dimension=1024,
         metric="cosine",
         spec=ServerlessSpec(cloud="aws", region="us-east-1"),
     )
 
 index = pc.Index(index_name)
 
-batch_size = 64  # smaller= safer
 
-print("Embedding + uploading in batches...")
+### upload embeddings 
+UPLOAD_EMBEDDINGS = True  
 
-for i in range(0, len(chunked_contexts), batch_size):
+if UPLOAD_EMBEDDINGS:
+    print("Embedding + uploading in batches...")
 
-    batch_texts = chunked_contexts[i:i+batch_size]
+    batch_size = 64
 
-    batch_embeddings = model.encode(
-        batch_texts,
-        batch_size=32,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype("float32")
+    for i in range(0, len(chunked_contexts), batch_size):
 
-    vectors = [
-        (
-            str(i + j),
-            batch_embeddings[j].tolist(),
-            {"text": batch_texts[j]}
-        )
-        for j in range(len(batch_texts))
-    ]
+        batch_texts = chunked_contexts[i:i+batch_size]
 
-    index.upsert(vectors=vectors, namespace="default")
+        batch_embeddings = model.encode(
+            batch_texts,
+            batch_size=16,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        ).astype("float32")
 
-    # free up memory
-    del batch_embeddings
-    del vectors
+        vectors = [
+            (
+                str(i + j),
+                batch_embeddings[j].tolist(),
+                {"text": batch_texts[j]}
+            )
+            for j in range(len(batch_texts))
+        ]
 
-    if i % 500 == 0:
-        print(f"Processed {i} / {len(chunked_contexts)}")
+        index.upsert(vectors=vectors, namespace="default")
 
-print("Pinecone upload complete!")
+        # free memory
+        del batch_embeddings
+        del vectors
+        gc.collect()
+
+        if i % 500 == 0:
+            print(f"Processed {i} / {len(chunked_contexts)}")
+
+    print("Pinecone upload complete!")
 
 
-### reranker (MiniLM)
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device="cpu")
+### reranker
+reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 
-### GPT-4o-mini decomposition
+### LLM query decomposition
 def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -178,7 +190,7 @@ def retrieve_bm25(query, top_k=10):
     return [chunked_contexts[i] for i in top_idx]
 
 
-### IMPORTANT: pass subqueries (no double LLM calls)
+### rerank
 def retrieve_with_rerank(query, subqueries, top_k=10):
     dense, sparse = [], []
 
