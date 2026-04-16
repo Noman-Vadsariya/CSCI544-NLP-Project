@@ -31,7 +31,7 @@ print("Total QA pairs:", len(queries))
 ### chunking
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
-def chunk_text(text, chunk_size=400, overlap=80):
+def chunk_text(text, chunk_size=350, overlap=80):
     tokens = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
 
@@ -64,7 +64,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 
-context_inputs = ["passage: " + c for c in chunked_contexts]
+context_inputs = chunked_contexts
 
 context_embeddings = model.encode(
     context_inputs,
