@@ -1,4 +1,4 @@
-##### BGE-Large + Hybrid Retrieval + GPT-4o-mini + MiniLM Reranker + MRR (WITH PROGRESS BARS)
+##### BGE-Large + Hybrid Retrieval + Query Decomposition (FIXED) + MiniLM Reranker + MRR
 
 import os
 import torch
@@ -20,6 +20,8 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ======================================== load data ========================================
+
 path = "/home1/vuvaness/CSCI544-NLP-Project/data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 ds = load_dataset("parquet", data_files=path)["train"]
 
@@ -30,11 +32,12 @@ answers = [x[0] for x in ds["responses"]]
 print("Total QA pairs:", len(queries))
 
 
-### chunking
+# ======================================== chunking ========================================
+
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
-def chunk_text(text, chunk_size=270, overlap=60):
-    tokens = tokenizer.encode(text, add_special_tokens=False)
+def chunk_text(text, chunk_size=480, overlap=80):
+    tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
     chunks = []
 
     for i in range(0, len(tokens), chunk_size - overlap):
@@ -53,16 +56,15 @@ for c in contexts:
 
 print("Total chunked contexts:", len(chunked_contexts))
 
-too_long = [c for c in chunked_contexts if len(tokenizer.encode(c)) > 512]
-print("Chunks over 512 tokens:", len(too_long))
 
+# ======================================== BM25 ========================================
 
-### BM25
 tokenized_corpus = [c.lower().split() for c in chunked_contexts]
 bm25 = BM25Okapi(tokenized_corpus)
 
 
-### embedding model
+# ======================================== embedding model ========================================
+
 torch.set_num_threads(1)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using device:", device)
@@ -70,7 +72,8 @@ print("Using device:", device)
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 
 
-### Pinecone setup
+# ======================================== pinecone ========================================
+
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index_name = "rag-index-v6"
 
@@ -85,63 +88,27 @@ if index_name not in [idx.name for idx in pc.list_indexes()]:
 index = pc.Index(index_name)
 
 
-### upload embeddings
-UPLOAD_EMBEDDINGS = False  # already uploaded  
+# ======================================== reranker ========================================
 
-if UPLOAD_EMBEDDINGS:
-    print("Embedding + uploading in batches...")
-
-    batch_size = 64
-
-    for i in tqdm(range(0, len(chunked_contexts), batch_size), desc="Embedding Progress"):
-
-        batch_texts = chunked_contexts[i:i+batch_size]
-
-        batch_embeddings = model.encode(
-            batch_texts,
-            batch_size=16,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        ).astype("float32")
-
-        vectors = [
-            (
-                str(i + j),
-                batch_embeddings[j].tolist(),
-                {"text": batch_texts[j]}
-            )
-            for j in range(len(batch_texts))
-        ]
-
-        index.upsert(vectors=vectors, namespace="default")
-
-        del batch_embeddings
-        del vectors
-        gc.collect()
-
-    print("Pinecone upload complete!")
-
-
-### reranker
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 
-### LLM query decomposition
+# ======================================== query decomposition ========================================
+
 def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
         try:
             prompt = f"""
 You are helping a retrieval system for multi-hop question answering.
 
-Given a question, generate 1 to 3 short search queries that help retrieve the key facts needed to answer it.
+Given a question, generate 1 to 3 short, keyword-focused search queries.
 
 Rules:
-- Always include the original question as one of the queries
-- Keep important entity names exactly as they appear
-- Do NOT make vague or generic queries
-- Each query should capture a distinct piece of information
-- If the question is simple, return ONLY the original question
-- Avoid rewording the same query multiple ways
+- Include the original question EXACTLY as one query
+- Keep entity names EXACT (no pronouns)
+- Keep queries short and retrieval-friendly
+- Each query should target a different key fact
+- Do NOT add new information
 
 Question:
 {query}
@@ -163,14 +130,14 @@ Return ONLY the queries, one per line.
                 if len(line.strip()) > 3
             ]
 
-            if query not in subqueries:
-                subqueries.append(query)
+            # enforce original query first
+            if query in subqueries:
+                subqueries.remove(query)
 
-            # remove duplicates
-            subqueries = list(set(subqueries))
+            subqueries = [query] + subqueries
 
-            if len(subqueries) > 0:
-                return subqueries
+            # limit to max 3
+            return subqueries[:3]
 
         except Exception as e:
             print(f"Retry {attempt+1} failed:", e)
@@ -179,8 +146,9 @@ Return ONLY the queries, one per line.
     raise RuntimeError("LLM decomposition failed")
 
 
-### retrieval
-def retrieve_contexts(query, top_k=15):
+# ======================================== retrieval ========================================
+
+def retrieve_contexts(query, top_k=25):
     query_embedding = model.encode(
         ["query: " + query],
         normalize_embeddings=True,
@@ -197,23 +165,26 @@ def retrieve_contexts(query, top_k=15):
     return [m["metadata"]["text"] for m in results["matches"]]
 
 
-def retrieve_bm25(query, top_k=10):
+def retrieve_bm25(query, top_k=25):
     scores = bm25.get_scores(query.lower().split())
     top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
     return [chunked_contexts[i] for i in top_idx]
 
 
-### rerank
 def retrieve_with_rerank(query, subqueries, top_k=10):
     dense, sparse = [], []
 
-    for q in subqueries:
-        dense += retrieve_contexts(q)
-        sparse += retrieve_bm25(q)
+    for i, q_sub in enumerate(subqueries):
+        # weight main query higher
+        k = 30 if i == 0 else 15
+
+        dense += retrieve_contexts(q_sub, top_k=k)
+        sparse += retrieve_bm25(q_sub, top_k=k)
 
     candidates = list(set(dense + sparse))
     random.shuffle(candidates)
-    candidates = candidates[:30]
+
+    # NO truncation
 
     pairs = [[query, c] for c in candidates]
     scores = reranker.predict(pairs)
@@ -223,7 +194,8 @@ def retrieve_with_rerank(query, subqueries, top_k=10):
     return [c for c, _ in ranked[:top_k]]
 
 
-### metrics
+# ======================================== metrics ========================================
+
 def compute_mrr(ranked, answer):
     for i, ctx in enumerate(ranked):
         if answer.lower() in ctx.lower():
@@ -231,10 +203,11 @@ def compute_mrr(ranked, answer):
     return 0
 
 
-### eval
+# ======================================== eval ========================================
+
 num_correct = 0
 mrr_total = 0
-num_samples = 500  # test
+num_samples = 500
 
 print("\nRunning evaluation...")
 
@@ -254,11 +227,9 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
 
     mrr_total += compute_mrr(retrieved, ans)
 
-    time.sleep(0.05)
-
 
 accuracy = num_correct / num_samples
 mrr = mrr_total / num_samples
 
-print(f"\nAccuracy@10: {accuracy:.4f}")
-print(f"MRR@10: {mrr:.4f}")
+print(f"\nAccuracy: {accuracy:.4f}")
+print(f"MRR: {mrr:.4f}")
