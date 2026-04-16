@@ -131,7 +131,17 @@ def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
         try:
             prompt = f"""
-Break this question into 2-4 short search queries for retrieval.
+You are helping a retrieval system for multi-hop question answering.
+
+Given a question, generate 1 to 3 short search queries that help retrieve the key facts needed to answer it.
+
+Rules:
+- Always include the original question as one of the queries
+- Keep important entity names exactly as they appear
+- Do NOT make vague or generic queries
+- Each query should capture a distinct piece of information
+- If the question is simple, return ONLY the original question
+- Avoid rewording the same query multiple ways
 
 Question:
 {query}
@@ -153,8 +163,14 @@ Return ONLY the queries, one per line.
                 if len(line.strip()) > 3
             ]
 
+            if query not in subqueries:
+                subqueries.append(query)
+
+            # remove duplicates
+            subqueries = list(set(subqueries))
+
             if len(subqueries) > 0:
-                return list(set(subqueries))
+                return subqueries
 
         except Exception as e:
             print(f"Retry {attempt+1} failed:", e)
@@ -218,7 +234,7 @@ def compute_mrr(ranked, answer):
 ### eval
 num_correct = 0
 mrr_total = 0
-num_samples = 100  # test
+num_samples = 500  # test
 
 print("\nRunning evaluation...")
 
