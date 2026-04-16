@@ -30,7 +30,7 @@ print("Total QA pairs:", len(queries))
 ### chunking
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
-def chunk_text(text, chunk_size=270, overlap=60):
+def chunk_text(text, chunk_size=480, overlap=80):
     tokens = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
 
@@ -83,7 +83,7 @@ index = pc.Index(index_name)
 
 
 ### upload embeddings (already done)
-UPLOAD_EMBEDDINGS = False
+UPLOAD_EMBEDDINGS = True
 
 
 ### reranker
@@ -91,7 +91,7 @@ reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 
 ### retrieval
-def retrieve_contexts(query, top_k=15):
+def retrieve_contexts(query, top_k=25):
     query_embedding = model.encode(
         ["query: " + query],
         normalize_embeddings=True,
@@ -108,7 +108,7 @@ def retrieve_contexts(query, top_k=15):
     return [m["metadata"]["text"] for m in results["matches"]]
 
 
-def retrieve_bm25(query, top_k=10):
+def retrieve_bm25(query, top_k=15):
     scores = bm25.get_scores(query.lower().split())
     top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
     return [chunked_contexts[i] for i in top_idx]
@@ -160,7 +160,7 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
 
     mrr_total += compute_mrr(retrieved, ans)
 
-    time.sleep(0.05)
+    # time.sleep(0.05)
 
 
 accuracy = num_correct / num_samples
