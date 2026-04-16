@@ -31,7 +31,7 @@ print("Total QA pairs:", len(queries))
 ### chunking
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
-def chunk_text(text, chunk_size=480, overlap=80):
+def chunk_text(text, chunk_size=400, overlap=80):
     tokens = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
 
