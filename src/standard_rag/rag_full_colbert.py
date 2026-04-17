@@ -22,11 +22,7 @@ CHUNK_OVERLAP = 80
 
 TOP_K = 10
 NUM_SAMPLES = 100
-
 BATCH_SIZE = 16
-
-CACHE_DIR = "./colbert_cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using device:", device)
@@ -75,66 +71,53 @@ def chunk_text(text):
     return chunks
 
 
+print("Building chunked contexts...")
+chunked_contexts = []
+for c in contexts:
+    chunked_contexts.extend(chunk_text(c))
+
+print("Total chunks:", len(chunked_contexts))
+
 # ----------------------------
-# LOAD OR BUILD CACHE
+# streaming encoding
 # ----------------------------
 
-emb_path = os.path.join(CACHE_DIR, "embeddings.pt")
-ctx_path = os.path.join(CACHE_DIR, "contexts.pt")
+SAVE_DIR = "./colbert_batches"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-if os.path.exists(emb_path) and os.path.exists(ctx_path):
-    print("Loading cached embeddings...")
+def encode_and_save_batches(texts):
+    print("Encoding with streaming save...")
 
-    passage_embeddings = torch.load(emb_path)
-    chunked_contexts = torch.load(ctx_path)
+    for i in tqdm(range(0, len(texts), 8)):
+        batch = texts[i:i+8]
 
-else:
-    print("Building chunked contexts...")
-    chunked_contexts = []
-    for c in contexts:
-        chunked_contexts.extend(chunk_text(c))
+        inputs = tokenizer(
+            ["passage: " + t for t in batch],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=480
+        ).to(device)
 
-    print("Total chunks:", len(chunked_contexts))
+        with torch.inference_mode():
+            outputs = encoder(**inputs)
 
-    # ----------------------------
-    # encode all passages
-    # ----------------------------
+        hidden = F.normalize(outputs.last_hidden_state, dim=-1)
+        mask = inputs["attention_mask"]
 
-    def encode_passages(texts):
-        all_embeddings = []
+        batch_embs = []
+        for j in range(len(batch)):
+            valid_len = int(mask[j].sum())
+            emb = hidden[j, 1:valid_len-1].cpu()
+            batch_embs.append(emb)
 
-        print("Encoding passages...")
+        torch.save(batch_embs, f"{SAVE_DIR}/batch_{i}.pt")
 
-        for i in tqdm(range(0, len(texts), 8)):
-            batch = texts[i:i+8]
+        del inputs, outputs, hidden, batch_embs
+        torch.cuda.empty_cache()
 
-            inputs = tokenizer(
-                ["passage: " + t for t in batch],
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=480
-            ).to(device)
-
-            with torch.inference_mode():
-                outputs = encoder(**inputs)
-
-            hidden = F.normalize(outputs.last_hidden_state, dim=-1)
-            mask = inputs["attention_mask"]
-
-            for j in range(len(batch)):
-                valid_len = int(mask[j].sum())
-                emb = hidden[j, 1:valid_len-1].detach().cpu()
-                all_embeddings.append(emb)
-
-        return all_embeddings
-
-    passage_embeddings = encode_passages(chunked_contexts)
-
-    torch.save(passage_embeddings, emb_path)
-    torch.save(chunked_contexts, ctx_path)
-
-    print("Saved embeddings!")
+# comment out later
+encode_and_save_batches(chunked_contexts)
 
 # ----------------------------
 # encode query
@@ -158,7 +141,7 @@ def encode_query(query):
     return hidden[0, 1:valid_len-1]
 
 # ----------------------------
-# batched colbert retrieval
+# full bert retrieval streamed
 # ----------------------------
 
 def retrieve(query):
@@ -168,7 +151,6 @@ def retrieve(query):
     for i in range(0, len(chunked_contexts), BATCH_SIZE):
         batch_texts = chunked_contexts[i:i+BATCH_SIZE]
 
-        # encode current batch only
         inputs = tokenizer(
             ["passage: " + t for t in batch_texts],
             return_tensors="pt",
@@ -183,22 +165,17 @@ def retrieve(query):
         hidden = F.normalize(outputs.last_hidden_state, dim=-1)
         mask = inputs["attention_mask"]
 
-        batch_embs = []
         for j in range(len(batch_texts)):
             valid_len = int(mask[j].sum())
-            emb = hidden[j, 1:valid_len-1]
-            batch_embs.append(emb)
+            p_emb = hidden[j, 1:valid_len-1]
 
-        # score immediately
-        for j, p_emb in enumerate(batch_embs):
             sim = torch.matmul(q_emb, p_emb.T)
             max_sim = sim.max(dim=1).values
             score = max_sim.sum().item()
 
             scores.append((i + j, score))
 
-        # free memory
-        del inputs, outputs, hidden, batch_embs
+        del inputs, outputs, hidden
         torch.cuda.empty_cache()
 
     scores.sort(key=lambda x: x[1], reverse=True)
