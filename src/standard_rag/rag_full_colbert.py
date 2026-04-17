@@ -21,9 +21,12 @@ CHUNK_SIZE = 480
 CHUNK_OVERLAP = 80
 
 TOP_K = 10
-NUM_SAMPLES = 100  # start small first!!
+NUM_SAMPLES = 100
 
-BATCH_SIZE = 64  # batched scoring
+BATCH_SIZE = 64
+
+CACHE_DIR = "./colbert_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using device:", device)
@@ -71,45 +74,67 @@ def chunk_text(text):
 
     return chunks
 
-chunked_contexts = []
-for c in contexts:
-    chunked_contexts.extend(chunk_text(c))
-
-print("Total chunks:", len(chunked_contexts))
 
 # ----------------------------
-# encode all passages once
+# LOAD OR BUILD CACHE
 # ----------------------------
 
-def encode_passages(texts):
-    all_embeddings = []
+emb_path = os.path.join(CACHE_DIR, "embeddings.pt")
+ctx_path = os.path.join(CACHE_DIR, "contexts.pt")
 
-    print("Encoding passages...")
+if os.path.exists(emb_path) and os.path.exists(ctx_path):
+    print("Loading cached embeddings...")
 
-    for i in tqdm(range(0, len(texts), 8)):
-        batch = texts[i:i+8]
+    passage_embeddings = torch.load(emb_path)
+    chunked_contexts = torch.load(ctx_path)
 
-        inputs = tokenizer(
-            ["passage: " + t for t in batch],
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=480
-        ).to(device)
+else:
+    print("Building chunked contexts...")
+    chunked_contexts = []
+    for c in contexts:
+        chunked_contexts.extend(chunk_text(c))
 
-        outputs = encoder(**inputs)
-        hidden = F.normalize(outputs.last_hidden_state, dim=-1)
+    print("Total chunks:", len(chunked_contexts))
 
-        mask = inputs["attention_mask"]
+    # ----------------------------
+    # encode all passages
+    # ----------------------------
 
-        for j in range(len(batch)):
-            valid_len = int(mask[j].sum())
-            emb = hidden[j, 1:valid_len-1].detach().cpu()
-            all_embeddings.append(emb)
+    def encode_passages(texts):
+        all_embeddings = []
 
-    return all_embeddings
+        print("Encoding passages...")
 
-passage_embeddings = encode_passages(chunked_contexts)
+        for i in tqdm(range(0, len(texts), 8)):
+            batch = texts[i:i+8]
+
+            inputs = tokenizer(
+                ["passage: " + t for t in batch],
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=480
+            ).to(device)
+
+            with torch.inference_mode():
+                outputs = encoder(**inputs)
+
+            hidden = F.normalize(outputs.last_hidden_state, dim=-1)
+            mask = inputs["attention_mask"]
+
+            for j in range(len(batch)):
+                valid_len = int(mask[j].sum())
+                emb = hidden[j, 1:valid_len-1].detach().cpu()
+                all_embeddings.append(emb)
+
+        return all_embeddings
+
+    passage_embeddings = encode_passages(chunked_contexts)
+
+    torch.save(passage_embeddings, emb_path)
+    torch.save(chunked_contexts, ctx_path)
+
+    print("Saved embeddings!")
 
 # ----------------------------
 # encode query
@@ -123,9 +148,10 @@ def encode_query(query):
         max_length=64
     ).to(device)
 
-    outputs = encoder(**inputs)
-    hidden = F.normalize(outputs.last_hidden_state, dim=-1)
+    with torch.inference_mode():
+        outputs = encoder(**inputs)
 
+    hidden = F.normalize(outputs.last_hidden_state, dim=-1)
     mask = inputs["attention_mask"][0]
     valid_len = int(mask.sum())
 
@@ -137,13 +163,11 @@ def encode_query(query):
 
 def retrieve(query):
     q_emb = encode_query(query).to(device)
-
     scores = []
 
     for i in range(0, len(passage_embeddings), BATCH_SIZE):
         batch = passage_embeddings[i:i+BATCH_SIZE]
 
-        # pad to same length
         max_len = max(p.shape[0] for p in batch)
 
         padded = []
@@ -154,17 +178,13 @@ def retrieve(query):
                 p = torch.cat([p, pad], dim=0)
             padded.append(p)
 
-        p_batch = torch.stack(padded).to(device)  # [B, p_len, dim]
+        p_batch = torch.stack(padded).to(device)
 
-        # compute similarity
         sim = torch.matmul(q_emb.unsqueeze(0), p_batch.transpose(1, 2))
-        sim = sim.squeeze(0)  # [B, q_len, p_len]
+        sim = sim.squeeze(0)
 
-        # max over passage tokens
-        max_sim = sim.max(dim=2).values  # [B, q_len]
-
-        # sum over query tokens
-        batch_scores = max_sim.sum(dim=1)  # [B]
+        max_sim = sim.max(dim=2).values
+        batch_scores = max_sim.sum(dim=1)
 
         for j, s in enumerate(batch_scores):
             scores.append((i + j, s.item()))
@@ -183,7 +203,6 @@ num_samples = min(NUM_SAMPLES, len(queries))
 print("\nRunning full ColBERT eval...")
 
 for i in tqdm(range(num_samples)):
-
     q = queries[i]
     ans = answers[i]
 
