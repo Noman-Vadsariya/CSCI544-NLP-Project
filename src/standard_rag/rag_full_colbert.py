@@ -23,7 +23,7 @@ CHUNK_OVERLAP = 80
 TOP_K = 10
 NUM_SAMPLES = 100
 
-BATCH_SIZE = 64
+BATCH_SIZE = 16
 
 CACHE_DIR = "./colbert_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
