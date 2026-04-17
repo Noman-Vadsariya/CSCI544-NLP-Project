@@ -165,29 +165,41 @@ def retrieve(query):
     q_emb = encode_query(query).to(device)
     scores = []
 
-    for i in range(0, len(passage_embeddings), BATCH_SIZE):
-        batch = passage_embeddings[i:i+BATCH_SIZE]
+    for i in range(0, len(chunked_contexts), BATCH_SIZE):
+        batch_texts = chunked_contexts[i:i+BATCH_SIZE]
 
-        max_len = max(p.shape[0] for p in batch)
+        # encode current batch only
+        inputs = tokenizer(
+            ["passage: " + t for t in batch_texts],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=480
+        ).to(device)
 
-        padded = []
-        for p in batch:
-            pad_len = max_len - p.shape[0]
-            if pad_len > 0:
-                pad = torch.zeros(pad_len, p.shape[1])
-                p = torch.cat([p, pad], dim=0)
-            padded.append(p)
+        with torch.inference_mode():
+            outputs = encoder(**inputs)
 
-        p_batch = torch.stack(padded).to(device)
+        hidden = F.normalize(outputs.last_hidden_state, dim=-1)
+        mask = inputs["attention_mask"]
 
-        sim = torch.matmul(q_emb.unsqueeze(0), p_batch.transpose(1, 2))
-        sim = sim.squeeze(0)
+        batch_embs = []
+        for j in range(len(batch_texts)):
+            valid_len = int(mask[j].sum())
+            emb = hidden[j, 1:valid_len-1]
+            batch_embs.append(emb)
 
-        max_sim = sim.max(dim=2).values
-        batch_scores = max_sim.sum(dim=1)
+        # score immediately
+        for j, p_emb in enumerate(batch_embs):
+            sim = torch.matmul(q_emb, p_emb.T)
+            max_sim = sim.max(dim=1).values
+            score = max_sim.sum().item()
 
-        for j, s in enumerate(batch_scores):
-            scores.append((i + j, s.item()))
+            scores.append((i + j, score))
+
+        # free memory
+        del inputs, outputs, hidden, batch_embs
+        torch.cuda.empty_cache()
 
     scores.sort(key=lambda x: x[1], reverse=True)
 
