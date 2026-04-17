@@ -9,3 +9,7 @@ train_outputs
 data/raw_datasets/self_gen/
 __pycache__/
 .claude/
+test.py
+data/raw_datasets/golden_rag_compact/
+data/raw_datasets/hotpotQA_gold_compact/
+data/raw_datasets/**/*.parquet

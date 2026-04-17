@@ -1,7 +1,7 @@
-sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
-  --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \
-  --dataset combined_noisy_dataset \
-  --output_dir train_outputs/stage1_combined_noisy_dataset_finetune \
+sbatch slurm/run_gpu2.sbatch src/hypernetwork/train_stage1.py \
+  --checkpoint /checkpoints/Qwen3-4B-Instruct-2507/pytorch_model.bin \
+  --dataset combined_gold_dataset \
+  --output_dir train_outputs/qwen/stage1_combined_gold_dataset_finetune \
   --num_train_epochs 5 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \
@@ -12,6 +12,8 @@ sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --wandb \
   --ctx_encoder_type per_layer_activations \
   --num_blocks 9 \
+  --per_layer_processing \
+  --quantize_ctx_encoder \
   --use_kl_loss \
   --use_per_ctx_average_loss \
   --gen_lora_l1_reg_coef 0.1

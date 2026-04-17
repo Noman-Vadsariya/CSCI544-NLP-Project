@@ -1,7 +1,7 @@
 sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --model_name google/gemma-2-2b-it \
-  --dataset hotpotQA_compact \
-  --output_dir train_outputs/stage1_hotpot_finetune \
+  --dataset asqa_compact \
+  --output_dir train_outputs/stage1_asqa_scratch \
   --num_train_epochs 5 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \

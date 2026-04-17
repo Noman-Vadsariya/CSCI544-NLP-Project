@@ -255,10 +255,11 @@ def self_generate(
     )
 
     ctxs = [sample["context"] for sample in ds]
-    questions = [
-        [add_closed_qa_prompt(q, closed_qa_prob) for q in sample["prompts"] if q]
-        for sample in ds
-    ]
+    # bug from original code they replace it directly right after 
+    # questions = [
+    #     [add_closed_qa_prompt(q, closed_qa_prob) for q in sample["prompts"] if q]
+    #     for sample in ds
+    # ]
 
     questions = [q_list for q_list in ds["prompts"] if len(q_list) > 0]
 
