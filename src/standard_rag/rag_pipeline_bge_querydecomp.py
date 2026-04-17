@@ -1,4 +1,4 @@
-##### BGE-Large + Hybrid Retrieval + Query Decomposition (FIXED) + MiniLM Reranker + MRR
+##### BGE-Large + Hybrid Retrieval + Query Decomposition + MiniLM Reranker + MRR
 
 import os
 import torch
@@ -6,6 +6,7 @@ import random
 import time
 import gc
 
+from collections import defaultdict
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from datasets import load_dataset
@@ -99,21 +100,22 @@ def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
         try:
             prompt = f"""
-You are helping a retrieval system for multi-hop question answering.
+You are helping a retrieval system answer multi-hop questions that require
+connecting information from multiple documents.
 
-Given a question, generate 1 to 3 short, keyword-focused search queries.
+Break the question into 2-3 specific sub-questions, where each targets
+a single fact or entity. Always include the original question.
 
-Rules:
-- Include the original question EXACTLY as one query
-- Keep entity names EXACT (no pronouns)
-- Keep queries short and retrieval-friendly
-- Each query should target a different key fact
-- Do NOT add new information
+For example:
+Q: "What country is the birthplace of the director of Inception?"
+Sub-questions:
+- Who directed Inception?
+- What country was Christopher Nolan born in?
+- What country is the birthplace of the director of Inception?
 
-Question:
-{query}
+Question: {query}
 
-Return ONLY the queries, one per line.
+Return ONLY the sub-questions, one per line. No numbering or bullets.
 """
 
             response = client.chat.completions.create(
@@ -130,13 +132,12 @@ Return ONLY the queries, one per line.
                 if len(line.strip()) > 3
             ]
 
-            # enforce original query first
+            # ensure original query is first
             if query in subqueries:
                 subqueries.remove(query)
 
             subqueries = [query] + subqueries
 
-            # limit to max 3
             return subqueries[:3]
 
         except Exception as e:
@@ -171,25 +172,35 @@ def retrieve_bm25(query, top_k=25):
     return [chunked_contexts[i] for i in top_idx]
 
 
+def reciprocal_rank_fusion(result_lists, k=60):
+    scores = defaultdict(float)
+    for results in result_lists:
+        for rank, doc in enumerate(results):
+            scores[doc] += 1 / (k + rank + 1)
+    return sorted(scores.keys(), key=lambda d: scores[d], reverse=True)
+
+
 def retrieve_with_rerank(query, subqueries, top_k=10):
-    dense, sparse = [], []
+    all_result_lists = []
 
     for i, q_sub in enumerate(subqueries):
-        # weight main query higher
-        k = 30 if i == 0 else 15
+        fetch_k = 25 if i == 0 else 15
+        all_result_lists.append(retrieve_contexts(q_sub, top_k=fetch_k))
+        all_result_lists.append(retrieve_bm25(q_sub, top_k=fetch_k))
 
-        dense += retrieve_contexts(q_sub, top_k=k)
-        sparse += retrieve_bm25(q_sub, top_k=k)
+    # RRF preserves rank signal across lists
+    candidates = reciprocal_rank_fusion(all_result_lists)[:60]
 
-    candidates = list(set(dense + sparse))
-    random.shuffle(candidates)
+    # rerank against all subqueries, take best score per candidate
+    best_scores = [-999.0] * len(candidates)
+    for q_sub in subqueries:
+        pairs = [[q_sub, c] for c in candidates]
+        scores = reranker.predict(pairs)
+        for j, s in enumerate(scores):
+            if s > best_scores[j]:
+                best_scores[j] = s
 
-    # NO truncation
-
-    pairs = [[query, c] for c in candidates]
-    scores = reranker.predict(pairs)
-
-    ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+    ranked = sorted(zip(candidates, best_scores), key=lambda x: x[1], reverse=True)
 
     return [c for c, _ in ranked[:top_k]]
 
@@ -199,7 +210,7 @@ def retrieve_with_rerank(query, subqueries, top_k=10):
 def compute_mrr(ranked, answer):
     for i, ctx in enumerate(ranked):
         if answer.lower() in ctx.lower():
-            return 1 / (i + 1)
+            return 1 / (i+1)
     return 0
 
 
