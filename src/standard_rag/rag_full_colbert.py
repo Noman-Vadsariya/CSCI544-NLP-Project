@@ -86,8 +86,8 @@ def encode_passages(texts):
 
     print("Encoding passages...")
 
-    for i in tqdm(range(0, len(texts), 16)):
-        batch = texts[i:i+16]
+    for i in tqdm(range(0, len(texts), 8)):
+        batch = texts[i:i+8]
 
         inputs = tokenizer(
             ["passage: " + t for t in batch],
