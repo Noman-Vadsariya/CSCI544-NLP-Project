@@ -102,7 +102,8 @@ def run_hypernet(model, tokenizer, example, max_new_tokens=512):
             return_tensors="pt",
         ).to(model.device)
         outputs = model.generate(input_ids=chat_ids, max_new_tokens=max_new_tokens)
-        decoded.append(tokenizer.decode(outputs[0], skip_special_tokens=False))
+        response_ids = outputs[0][chat_ids.shape[1]:]
+        decoded.append(tokenizer.decode(response_ids, skip_special_tokens=True))
     return decoded
 
 
@@ -110,8 +111,9 @@ def run_baseline(model, tokenizer, example, max_new_tokens=512):
     decoded = []
     for prompt in example["prompts"]:
         user_content = (
-            f"Use the following context to answer the question.\n\n"
-            f"Context:\n{example['context']}\n\n"
+            f"Answer the question based on the given passages. "
+            f"Only give me the answer and do not output any other words.\n\n"
+            f"Passages:\n{example['context']}\n\n"
             f"Question: {prompt}"
         )
         chat_ids = tokenizer.apply_chat_template(
@@ -123,7 +125,8 @@ def run_baseline(model, tokenizer, example, max_new_tokens=512):
         ).to(model.device)
         with torch.no_grad():
             outputs = model.generate(input_ids=chat_ids, max_new_tokens=max_new_tokens)
-        decoded.append(tokenizer.decode(outputs[0], skip_special_tokens=False))
+        response_ids = outputs[0][chat_ids.shape[1]:]
+        decoded.append(tokenizer.decode(response_ids, skip_special_tokens=True))
     return decoded
 
 
