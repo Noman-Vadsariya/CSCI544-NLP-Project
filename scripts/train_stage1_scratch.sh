@@ -1,12 +1,12 @@
 sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \
   --model_name google/gemma-2-2b-it \
-  --dataset asqa_compact \
-  --output_dir train_outputs/stage1_asqa_scratch \
-  --num_train_epochs 5 \
+  --dataset hotpotQA_gold_compact \
+  --output_dir train_outputs/stage1_hotpotQA_gold_compact_scratch \
+  --num_train_epochs 10 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \
   --max_packed_inp_len 4096 \
-  --max_packed_ctx_len 4096 \
+  --max_packed_ctx_len 3072 \
   --logging_steps 10 \
   --bf16 \
   --wandb \

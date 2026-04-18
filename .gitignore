@@ -13,3 +13,4 @@ test.py
 data/raw_datasets/golden_rag_compact/
 data/raw_datasets/hotpotQA_gold_compact/
 data/raw_datasets/**/*.parquet
+**/*.jsonl
