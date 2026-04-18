@@ -6,8 +6,8 @@ import torch
 from torch import nn
 from transformers import PreTrainedModel
 
-from ctx_to_lora.configs import CtxEncoderArguments
-from ctx_to_lora.utils import get_base_model
+from src.hypernetwork.ctx_to_lora.configs import CtxEncoderArguments
+from src.hypernetwork.ctx_to_lora.utils import get_base_model
 
 logger = logging.getLogger()
 

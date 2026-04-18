@@ -302,12 +302,12 @@ DS_KWARGS = {
     "qwen_combined_gold_dataset": dict(
         train=dict(
             path="parquet",
-            data_files="=data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            data_files="data/raw_datasets/self_gen/Qwen/Qwen3-4B-Instruct-2507_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
             split="train[2000:]",
         ),
         validation=dict(
             path="parquet",
-            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            data_files="data/raw_datasets/self_gen/Qwen/Qwen3-4B-Instruct-2507_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
             split="train[:2000]",
         ),
         test=dict(
