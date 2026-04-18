@@ -354,7 +354,7 @@ colbert_scorer = ColBERTStyleScorer(
 def split_into_sentences(text):
     return re.split(r'(?<=[.!?])\s+', text)
 
-def filter_sentences(query, contexts, top_n=2):
+def filter_sentences(query, contexts, top_n=2, batch_size=64):
     q_emb = dense_model.encode(
         ["query: " + query],
         normalize_embeddings=True,
@@ -362,22 +362,36 @@ def filter_sentences(query, contexts, top_n=2):
         device=device,
     )[0]
 
-    filtered_contexts = []
+    # Flatten all sentences across contexts, tracking which context each belongs to.
+    all_sentences = []
+    ctx_boundaries = []  # (start_idx, end_idx) into all_sentences per context
 
     for ctx in contexts:
         sentences = split_into_sentences(ctx)
+        start = len(all_sentences)
+        all_sentences.extend(sentences if sentences else [ctx])
+        ctx_boundaries.append((start, len(all_sentences)))
+
+    # Encode all sentences in batches to avoid OOM.
+    all_embs = dense_model.encode(
+        ["passage: " + s for s in all_sentences],
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+        batch_size=batch_size,
+        show_progress_bar=False,
+        device=device,
+    )
+
+    filtered_contexts = []
+
+    for (start, end) in ctx_boundaries:
+        sentences = all_sentences[start:end]
 
         if len(sentences) == 0:
-            filtered_contexts.append(ctx)
+            filtered_contexts.append("")
             continue
 
-        sent_embs = dense_model.encode(
-            ["passage: " + s for s in sentences],
-            normalize_embeddings=True,
-            convert_to_numpy=True,
-            device=device,
-        )
-
+        sent_embs = all_embs[start:end]
         scores = sent_embs @ q_emb
         top_idx = scores.argsort()[::-1][:top_n]
 
@@ -596,4 +610,4 @@ print(f"Recall@2    : {recall_2:.4f}")
 print(f"Recall@5    : {recall_5:.4f}")
 print(f"MRR@2       : {mrr_2:.4f}")
 print(f"MRR@5       : {mrr_5:.4f}")
-print(f"F1 (word)   : {f1_score:.4f}")  
+print(f"F1 (word)   : {f1_score:.4f}")
