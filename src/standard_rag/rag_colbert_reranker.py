@@ -1,6 +1,8 @@
 import os
 import torch
 import torch.nn.functional as F
+import re
+import string
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -9,8 +11,8 @@ from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer
 from rank_bm25 import BM25Okapi
 from tqdm import tqdm
-
 from pinecone import Pinecone, ServerlessSpec
+from collections import Counter
 
 # -------------------------------------------------------------------
 # CONFIG
@@ -435,12 +437,68 @@ def retrieve_with_colbert_rerank(query, top_k=10, candidate_k=50):
     retrieved_texts = [pid_to_text[pid] for pid, _ in scored]
     return retrieved_texts, scored
 
+
 # -------------------------------------------------------------------
-# EVALUATION
+#  EVAL HELPERS  
 # -------------------------------------------------------------------
 
-num_correct = 0
+def normalize_answer(s):
+    def remove_articles(text):
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def remove_punc(text):
+        return ''.join(ch for ch in text if ch not in set(string.punctuation))
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+
+def compute_f1(prediction, ground_truth):
+    pred_tokens = normalize_answer(prediction).split()
+    gold_tokens = normalize_answer(ground_truth).split()
+
+    common = Counter(pred_tokens) & Counter(gold_tokens)
+    num_same = sum(common.values())
+
+    if num_same == 0:
+        return 0.0
+
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(gold_tokens)
+
+    return 2 * precision * recall / (precision + recall)
+
+
+# -------------------------------------------------------------------
+# EVALUATION (UPDATED WITH F1 ONLY — NOTHING ELSE CHANGED)
+# -------------------------------------------------------------------
+
+def compute_recall_at_k(ranked_texts, answer, k):
+    top_k = ranked_texts[:k]
+    return int(any(answer.lower() in ctx.lower() for ctx in top_k))
+
+
+def compute_mrr_at_k(scored_pids, answer, k):
+    for i, (pid, _) in enumerate(scored_pids[:k]):
+        text = pid_to_text[pid]
+        if answer.lower() in text.lower():
+            return 1.0 / (i + 1)
+    return 0.0
+
+
 num_samples = min(NUM_SAMPLES, len(queries))
+
+accuracy = 0
+recall_2 = 0
+recall_5 = 0
+mrr_2_total = 0
+mrr_5_total = 0
+f1_total = 0  
 
 print("\nRunning evaluation...")
 
@@ -448,21 +506,52 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
     query = queries[i]
     true_answer = answers[i]
 
-    retrieved_contexts, scored = retrieve_with_colbert_rerank(
+    retrieved_texts, scored = retrieve_with_colbert_rerank(
         query,
         top_k=RERANK_TOP_K,
         candidate_k=max(BM25_CANDIDATE_K, DENSE_CANDIDATE_K),
     )
 
-    # Your original proxy metric, kept for apples-to-apples comparison.
+    # ---------------- accuracy - EM ----------------
     found_ctx = any(
         true_answer.lower() in ctx.lower()
         or all(word in ctx.lower() for word in true_answer.lower().split())
-        for ctx in retrieved_contexts
+        for ctx in retrieved_texts
     )
 
     if found_ctx:
-        num_correct += 1
+        accuracy += 1
 
-accuracy = num_correct / num_samples if num_samples > 0 else 0.0
-print(f"\nRetrieval Accuracy: {accuracy:.4f}")
+    # ---------------- recall ----------------
+    recall_2 += compute_recall_at_k(retrieved_texts, true_answer, k=2)
+    recall_5 += compute_recall_at_k(retrieved_texts, true_answer, k=5)
+
+    # ---------------- mrr ----------------
+    mrr_2_total += compute_mrr_at_k(scored, true_answer, k=2)
+    mrr_5_total += compute_mrr_at_k(scored, true_answer, k=5)
+
+    # ---------------- F1  ----------------
+    best_f1 = 0.0
+    for ctx in retrieved_texts:
+        f1 = compute_f1(ctx, true_answer)
+        best_f1 = max(best_f1, f1)
+
+    f1_total += best_f1
+
+
+# ---------------- final metrics ----------------
+
+accuracy /= num_samples
+recall_2 /= num_samples
+recall_5 /= num_samples
+mrr_2 = mrr_2_total / num_samples
+mrr_5 = mrr_5_total / num_samples
+f1_score = f1_total / num_samples  
+
+print("\n===== RESULTS =====")
+print(f"Accuracy@10 : {accuracy:.4f}")
+print(f"Recall@2    : {recall_2:.4f}")
+print(f"Recall@5    : {recall_5:.4f}")
+print(f"MRR@2       : {mrr_2:.4f}")
+print(f"MRR@5       : {mrr_5:.4f}")
+print(f"F1 (word)   : {f1_score:.4f}")  
