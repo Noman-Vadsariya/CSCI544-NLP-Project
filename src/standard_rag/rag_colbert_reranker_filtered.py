@@ -50,7 +50,7 @@ MAX_PASSAGE_LEN = 480
 # Evaluation
 NUM_SAMPLES = 200
 
-UPSERT_PINECONE = False  # set to False to skip Pinecone upload 
+UPSERT_PINECONE = True  # set to False to skip Pinecone upload 
 
 # -------------------------------------------------------------------
 # LOAD DATA
