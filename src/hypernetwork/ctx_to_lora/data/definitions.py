@@ -125,7 +125,7 @@ DS_KWARGS = {
             split="train",
         )
     ),
-    "hotpotQA_compact": dict(
+    "gen_hotpotQA_compact": dict(
         train=dict(
             path="parquet",
             data_files="data/raw_datasets/hotpotQA_compact/train/ds.parquet",
@@ -134,13 +134,187 @@ DS_KWARGS = {
         test=dict(
             path="parquet",
             data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
-            split="validation", 
+            split="test", 
         ) 
+    ),
+    "hotpotQA_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_compact/train/ds_*.parquet",
+            split="train[200:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/hotpotQA_compact/train/ds_*.parquet",
+            split="train[:200]",
+        ),
+        # test=dict(
+        #     path="parquet",
+        #     data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
+        #     split="validation", 
+        # ) 
+    ),
+    "gen_hotpotQA_gold_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/hotpotQA_gold_compact/train/ds.parquet",
+            split="train",
+        ),
         test=dict(
             path="parquet",
-            data_files="data/raw_datasets/hotpotQA_compact/test/ds.parquet",
+            data_files="data/raw_datasets/hotpotQA_gold_compact/test/ds.parquet",
             split="test",
         )
+    ),
+    "hotpotQA_gold_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[200:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/hotpotQA_gold_compact/train/ds_*.parquet",
+            split="train[:200]",
+        ),
+        # test=dict(
+        #     path="parquet",
+        #     data_files="data/raw_datasets/hotpotQA_gold_compact/test/ds.parquet",
+        #     split="test",
+        # )
+    ),
+    "gen_prontoQA_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/prontoQA_compact/train/ds.parquet",
+            split="train",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/prontoQA_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
+    "prontoQA_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/prontoQA_compact/train/ds_*.parquet",
+            split="train[50:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/prontoQA_compact/train/ds_*.parquet",
+            split="train[:50]",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/prontoQA_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
+    "gen_asqa_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/train/ds.parquet",
+            split="train",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
+    "asqa_compact": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/asqa_compact/train/ds_*.parquet",
+            split="train[200:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.1/asqa_compact/train/ds_*.parquet",
+            split="train[:200]",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/asqa_compact/test/ds.parquet",
+            split="test",
+        )
+    ),
+    "gen_combined_noisy_dataset": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/combined_noisy_dataset/train/ds.parquet",
+            split="train",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/combined_noisy_dataset/test/ds.parquet",
+            split="test",
+        ),
+    ),
+    "combined_noisy_dataset": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/combined_noisy_dataset/train/ds_*.parquet",
+            split="train[2000:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_0.0/combined_noisy_dataset/train/ds_*.parquet",
+            split="train[:2000]",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/combined_noisy_dataset/test/ds.parquet",
+            split="test",
+        ),
+    ),
+    "gen_combined_gold_dataset": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/golden_rag_compact/train/ds.parquet",
+            split="train",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/golden_rag_compact/test/ds.parquet",
+            split="test",
+        ),
+    ),
+    "combined_gold_dataset": dict(
+        train=dict(
+            path="parquet",
+            data_files="=data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            split="train[2000:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/google/gemma-2-2b-it_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            split="train[:2000]",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/combined_noisy_dataset/test/ds.parquet",
+            split="test",
+        ),
+    ),
+    "qwen_combined_gold_dataset": dict(
+        train=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/Qwen/Qwen3-4B-Instruct-2507_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            split="train[2000:]",
+        ),
+        validation=dict(
+            path="parquet",
+            data_files="data/raw_datasets/self_gen/Qwen/Qwen3-4B-Instruct-2507_temp_0.0_closed_qa_prob_1.0/gen_combined_gold_dataset/train/ds_*.parquet",
+            split="train[:2000]",
+        ),
+        test=dict(
+            path="parquet",
+            data_files="data/raw_datasets/combined_noisy_dataset/test/ds.parquet",
+            split="test",
+        ),
     ),
 }
 

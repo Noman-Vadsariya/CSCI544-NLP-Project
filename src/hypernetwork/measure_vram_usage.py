@@ -10,9 +10,9 @@ from math import ceil
 
 import torch
 
-from ctx_to_lora.model_loading import get_tokenizer
-from ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
-from ctx_to_lora.data.definitions import CTX_AFFIXES
+from src.hypernetwork.ctx_to_lora.model_loading import get_tokenizer
+from src.hypernetwork.ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
+from src.hypernetwork.ctx_to_lora.data.definitions import CTX_AFFIXES
 
 CHECKPOINT_PATH = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin"
 

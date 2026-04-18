@@ -81,17 +81,20 @@ def combine_and_shuffle_parquet_files(
 if __name__ == "__main__":
     # Specify the dataset folders to combine
     dataset_folders = [
-        "./raw_datasets/hotpotQA_compact",
-        # "./raw_datasets/hotpotQA_gold_compact",
-        "./raw_datasets/asqa_compact",
-        "./raw_datasets/prontoQA_compact",
+        # "./raw_datasets/hotpotQA_compact",
+        "./data/raw_datasets/hotpotQA_gold_compact",
+        "./data/raw_datasets/asqa_compact",
+        "./data/raw_datasets/prontoQA_compact",
     ]
 
     # output_train_file = "./raw_datasets/combined_compact/train/ds.parquet"
     # output_test_file = "./raw_datasets/combined_compact/test/ds.parquet"
 
-    output_train_file = "./raw_datasets/combined_noisy_datasets/train/ds.parquet"
-    output_test_file = "./raw_datasets/combined_noisy_datasets/test/ds.parquet"
+    # output_train_file = "./raw_datasets/combined_noisy_datasets/train/ds.parquet"
+    # output_test_file = "./raw_datasets/combined_noisy_datasets/test/ds.parquet"
+
+    output_train_file = "./data/raw_datasets/golden_rag_compact/train/ds.parquet"
+    output_test_file = "./data/raw_datasets/golden_rag_compact/test/ds.parquet"
 
     combine_and_shuffle_parquet_files(
         dataset_folders, output_train_file, output_test_file

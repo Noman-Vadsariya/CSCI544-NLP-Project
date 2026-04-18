@@ -14,15 +14,15 @@ from torch import Tensor, nn
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import ModelOutput
 
-from ctx_to_lora.data.definitions import CTX_AFFIXES
-from ctx_to_lora.data.q_generation_template import (
+from src.hypernetwork.ctx_to_lora.data.definitions import CTX_AFFIXES
+from src.hypernetwork.ctx_to_lora.data.q_generation_template import (
     Q_GEN_PROMPT_TEMPLATE,
     Q_GEN_PROMPT_TEMPLATE_REPEAT,
     Q_GEN_SYSTEM_TEMPLATE,
     STOP_STRINGS,
 )
-from ctx_to_lora.data.self_gen_template import SELF_QA_INTX
-from ctx_to_lora.utils import log_num_train_params
+from src.hypernetwork.ctx_to_lora.data.self_gen_template import SELF_QA_INTX
+from src.hypernetwork.ctx_to_lora.utils import log_num_train_params
 
 logger = logging.getLogger()
 
@@ -546,8 +546,8 @@ class CtxDistillModel(nn.Module):
 
 
 if __name__ == "__main__":
-    from ctx_to_lora.data.processing import load_and_process_dataset
-    from ctx_to_lora.model_loading import get_lora_config, get_model_and_tokenizer
+    from src.hypernetwork.ctx_to_lora.data.processing import load_and_process_dataset
+    from src.hypernetwork.ctx_to_lora.model_loading import get_lora_config, get_model_and_tokenizer
 
     model_name = "google/gemma-2-2b-it"
     q_model_name = "google/gemma-3-12b-it"

@@ -1,0 +1,20 @@
+sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage2.py \
+  --checkpoint train_outputs/stage1_hotpotQA_gold_compact_finetune/pytorch_model.bin \
+  --dataset hotpotQA_gold_compact \
+  --output_dir train_outputs/stage2_hotpotQA_gold_compact_finetune \
+  --num_train_epochs 5 \
+  --learning_rate 2e-5 \
+  --gradient_accumulation_steps 8 \
+  --max_packed_inp_len 1024 \
+  --max_packed_ctx_len 2048 \
+  --max_ctx_chunk_len 512 \
+  --min_ctx_chunk_len 25 \
+  --num_chunk_probs '{"1":0.5,"2":0.125,"3":0.0625,"4":0.0625,"5":0.0625,"6":0.0625,"7":0.0625,"8":0.0625}' \
+  --logging_steps 10 \
+  --bf16 \
+  --wandb \
+  --ctx_encoder_type per_layer_activations \
+  --num_blocks 9 \
+  --use_kl_loss \
+  --use_per_ctx_average_loss \
+  --gen_lora_l1_reg_coef 0.1

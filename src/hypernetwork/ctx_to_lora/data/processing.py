@@ -15,7 +15,7 @@ import torch
 from datasets import Dataset, interleave_datasets, is_caching_enabled, load_dataset
 from transformers import PreTrainedTokenizerBase
 
-from ctx_to_lora.data.definitions import (
+from src.hypernetwork.ctx_to_lora.data.definitions import (
     CTX_AFFIXES,
     DS_KWARGS,
     IGNORE_INDEX,
@@ -23,10 +23,10 @@ from ctx_to_lora.data.definitions import (
     SELF_GEN_DATA_DIR,
     TRANSFORMED_DATA_DIR,
 )
-from ctx_to_lora.data.packing import pack_batch
-from ctx_to_lora.data.preprocessing_fn import get_preprocessing_fn
-from ctx_to_lora.data.self_gen_template import QA_PROMPT_TEMPLATE
-from ctx_to_lora.utils import check_is_iterable, concat_list
+from src.hypernetwork.ctx_to_lora.data.packing import pack_batch
+from src.hypernetwork.ctx_to_lora.data.preprocessing_fn import get_preprocessing_fn
+from src.hypernetwork.ctx_to_lora.data.self_gen_template import QA_PROMPT_TEMPLATE
+from src.hypernetwork.ctx_to_lora.utils import check_is_iterable, concat_list
 
 logger = logging.getLogger()
 
@@ -758,7 +758,12 @@ def split_too_long_ctx(
         )
         # Remove options that would yield chunk length > max_chunk_len
         filt = {k: v for k, v in filt.items() if k >= min_required}
-        n_chunks = choices(list(filt.keys()), weights=list(filt.values()), k=1)[0]
+        if filt:
+            n_chunks = choices(list(filt.keys()), weights=list(filt.values()), k=1)[0]
+        else:
+            # Context too long for any configured chunk count; use the
+            # minimum number of chunks that keeps each under max_chunk_len.
+            n_chunks = min_required
 
     # Derive n_chunks if not sampled (e.g., eval or fallback)
     if n_chunks is None:

@@ -10,12 +10,12 @@ from transformers import (
     PreTrainedModel,
 )
 
-from ctx_to_lora.configs import (
+from src.hypernetwork.ctx_to_lora.configs import (
     AggregatorArguments,
 )
-from ctx_to_lora.modeling.idefics2 import Idefics2Perceiver, Idefics2PerceiverConfig
-from ctx_to_lora.pooling import POOL_FN
-from ctx_to_lora.utils import (
+from src.hypernetwork.ctx_to_lora.modeling.idefics2 import Idefics2Perceiver, Idefics2PerceiverConfig
+from src.hypernetwork.ctx_to_lora.pooling import POOL_FN
+from src.hypernetwork.ctx_to_lora.utils import (
     get_num_layers,
 )
 

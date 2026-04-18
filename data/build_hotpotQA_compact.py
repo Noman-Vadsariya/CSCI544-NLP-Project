@@ -24,7 +24,8 @@ def merge_parquet_file():
 if __name__ == "__main__":
     ds_name = "data/raw_datasets/raw_hotpotQA"
     # merge_parquet_file()
-    for split in ["train", "test"]:
+    # for split in ["train", "test"]:
+    for split in ["test"]:
         ctx_qa_dict = dict()
         ds = load_dataset(ds_name, split=split)
         for i, sample in tqdm(enumerate(ds)):

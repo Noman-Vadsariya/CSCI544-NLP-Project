@@ -8,7 +8,7 @@ from einops import einsum
 from jaxtyping import Float, Integer
 from torch import Tensor
 
-from ctx_to_lora.utils import get_layers
+from src.hypernetwork.ctx_to_lora.utils import get_layers
 
 
 def lora_forward(

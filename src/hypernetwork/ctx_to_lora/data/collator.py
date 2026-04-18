@@ -5,7 +5,7 @@ from transformers.data import (
     default_data_collator,
 )
 
-from ctx_to_lora.utils import check_is_iterable, concat_list
+from src.hypernetwork.ctx_to_lora.utils import check_is_iterable, concat_list
 
 flattener = DataCollatorWithFlattening()
 

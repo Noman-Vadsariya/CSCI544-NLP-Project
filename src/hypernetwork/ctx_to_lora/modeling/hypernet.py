@@ -26,29 +26,29 @@ from transformers import (
 from transformers.modeling_outputs import ModelOutput
 from transformers.models.modernbert.modeling_modernbert import ModernBertModel
 
-from ctx_to_lora.configs import (
+from src.hypernetwork.ctx_to_lora.configs import (
     AggregatorArguments,
     CtxEncoderArguments,
     HypernetArguments,
 )
-from ctx_to_lora.data.processing import tokenize_ctx_text
-from ctx_to_lora.model_loading import (
+from src.hypernetwork.ctx_to_lora.data.processing import tokenize_ctx_text
+from src.hypernetwork.ctx_to_lora.model_loading import (
     get_model,
     get_tokenizer,
 )
-from ctx_to_lora.modeling.aggregator import (
+from src.hypernetwork.ctx_to_lora.modeling.aggregator import (
     AGGREGATOR_CLS,
     AggregatorConfig,
     get_aggregator_config,
 )
-from ctx_to_lora.modeling.ctx_encoder import CTX_ENCODER_CLS, CTX_ENCODER_TYPE
-from ctx_to_lora.modeling.lora_layer import (
+from src.hypernetwork.ctx_to_lora.modeling.ctx_encoder import CTX_ENCODER_CLS, CTX_ENCODER_TYPE
+from src.hypernetwork.ctx_to_lora.modeling.lora_layer import (
     apply_lora_to_layers,
     lora_forward,
     lora_forward_packed,
 )
-from ctx_to_lora.modeling.lora_merger import combine_lora
-from ctx_to_lora.utils import (
+from src.hypernetwork.ctx_to_lora.modeling.lora_merger import combine_lora
+from src.hypernetwork.ctx_to_lora.utils import (
     get_layers,
     get_num_layers,
     get_peft_in_out_features,

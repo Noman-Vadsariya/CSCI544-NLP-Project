@@ -7,7 +7,7 @@ import pprint
 
 import numpy as np
 
-from ctx_to_lora.utils import check_is_iterable, concat_list
+from src.hypernetwork.ctx_to_lora.utils import check_is_iterable, concat_list
 
 logger = logging.getLogger()
 

@@ -422,10 +422,6 @@ class Idefics2PerceiverFlashAttention2(Idefics2PerceiverAttention):
         key_states = key_states.transpose(1, 2)
         value_states = value_states.transpose(1, 2)
 
-        # Never pass position_ids to _flash_attention_forward here —
-        # cu_seq_lens (passed via **kwargs) already handle the varlen path,
-        # and position_ids may be a bool or misshapen tensor that newer
-        # transformers can't handle.
         attn_output = _flash_attention_forward(
             query_states,
             key_states,
@@ -433,7 +429,7 @@ class Idefics2PerceiverFlashAttention2(Idefics2PerceiverAttention):
             attention_mask,
             q_len,
             dropout=dropout_rate,
-            position_ids=None,
+            position_ids=position_ids,
             sliding_window=None,
             is_causal=self.is_causal,
             use_top_left_mask=self._flash_attn_uses_top_left_mask,
