@@ -80,8 +80,8 @@ dense_model = SentenceTransformer(BGE_MODEL_NAME, device=device)
 
 # Raw transformer backbone for token-level late interaction scoring
 # Important: this is NOT SentenceTransformer pooling; we use last_hidden_state.
-tokenizer = AutoTokenizer.from_pretrained(BGE_MODEL_NAME)
-encoder = AutoModel.from_pretrained(BGE_MODEL_NAME).to(device)
+tokenizer = dense_model.tokenizer
+encoder = dense_model[0].auto_model
 encoder.eval()
 
 # -------------------------------------------------------------------
