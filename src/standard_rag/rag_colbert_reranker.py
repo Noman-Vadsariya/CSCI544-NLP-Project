@@ -475,7 +475,7 @@ def compute_f1(prediction, ground_truth):
 
 
 # -------------------------------------------------------------------
-# EVALUATION (UPDATED WITH F1 ONLY — NOTHING ELSE CHANGED)
+# EVALUATION
 # -------------------------------------------------------------------
 
 def compute_recall_at_k(ranked_texts, answer, k):
