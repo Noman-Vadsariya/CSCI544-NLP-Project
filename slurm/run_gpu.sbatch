@@ -18,4 +18,4 @@ module load cuda/12.4.0
 
 cd $SLURM_SUBMIT_DIR
 
-uv run python "$@"
+PYTHONPATH=src/hypernetwork:. uv run python "$@"

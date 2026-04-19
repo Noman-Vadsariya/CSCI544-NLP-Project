@@ -14,7 +14,7 @@ from transformers import (
     set_seed,
 )
 
-from ctx_to_lora.configs import (
+from src.hypernetwork.ctx_to_lora.configs import (
     AggregatorArguments,
     ArgumentParser,
     CtxEncoderArguments,
@@ -26,29 +26,29 @@ from ctx_to_lora.configs import (
     ModelArguments,
     TrainingArguments,
 )
-from ctx_to_lora.data.collator import (  # train_packed_collator,; DefaultDataCollator,
+from src.hypernetwork.ctx_to_lora.data.collator import (  # train_packed_collator,; DefaultDataCollator,
     flatten_if_not_packed,
 )
-from ctx_to_lora.data.processing import get_tokenized_dataset, pack
-from ctx_to_lora.metrics import (
+from src.hypernetwork.ctx_to_lora.data.processing import get_tokenized_dataset, pack
+from src.hypernetwork.ctx_to_lora.metrics import (
     Evaluator,
     compute_metrics,
     compute_per_token_acc,
     compute_perplexity,
     compute_prefix_matching,
 )
-from ctx_to_lora.model_loading import (
+from src.hypernetwork.ctx_to_lora.model_loading import (
     check_is_vision_model,
     get_lora_config,
     get_model_and_tokenizer,
     get_tokenizer,
 )
-from ctx_to_lora.modeling.hypernet import (
+from src.hypernetwork.ctx_to_lora.modeling.hypernet import (
     ModulatedPretrainedModel,
     get_hypernet_config,
 )
-from ctx_to_lora.trainer import train_model
-from ctx_to_lora.utils import (
+from src.hypernetwork.ctx_to_lora.trainer import train_model
+from src.hypernetwork.ctx_to_lora.utils import (
     compile_linear,
     extract_cli_args,
     get_run_name,

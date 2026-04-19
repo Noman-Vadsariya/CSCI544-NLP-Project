@@ -34,31 +34,31 @@ from datasets import disable_caching
 from transformers import AutoConfig, set_seed
 from transformers import TrainingArguments
 
-from ctx_to_lora.configs import (
+from src.hypernetwork.ctx_to_lora.configs import (
     HypernetArguments,
     AggregatorArguments,
     CtxEncoderArguments,
 )
-from ctx_to_lora.data.collator import flatten_if_not_packed
-from ctx_to_lora.data.processing import get_tokenized_dataset, pack
-from ctx_to_lora.model_loading import (
+from src.hypernetwork.ctx_to_lora.data.collator import flatten_if_not_packed
+from src.hypernetwork.ctx_to_lora.data.processing import get_tokenized_dataset, pack
+from src.hypernetwork.ctx_to_lora.model_loading import (
     get_lora_config,
     get_model_and_tokenizer,
     get_tokenizer,
 )
-from ctx_to_lora.modeling.hypernet import (
+from src.hypernetwork.ctx_to_lora.modeling.hypernet import (
     ModulatedPretrainedModel,
     get_hypernet_config,
 )
-from ctx_to_lora.metrics import (
+from src.hypernetwork.ctx_to_lora.metrics import (
     Evaluator,
     compute_metrics,
     compute_per_token_acc,
     compute_perplexity,
     compute_prefix_matching,
 )
-from ctx_to_lora.trainer import train_model
-from ctx_to_lora.utils import compile_linear, log_num_train_params
+from src.hypernetwork.ctx_to_lora.trainer import train_model
+from src.hypernetwork.ctx_to_lora.utils import compile_linear, log_num_train_params
 
 os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "true"
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
@@ -106,7 +106,7 @@ def parse_args():
     p.add_argument(
         "--n_latent_queries",
         type=int,
-        default=208,
+        default=8,
         help="Perceiver latent queries",
     )
     p.add_argument(
@@ -118,7 +118,7 @@ def parse_args():
     p.add_argument(
         "--num_blocks",
         type=int,
-        default=9,
+        default=8,
         help="Number of perceiver blocks",
     )
     p.add_argument(
@@ -126,6 +126,16 @@ def parse_args():
         type=int,
         default=0,
         help="Number of self-attention layers per perceiver block",
+    )
+    p.add_argument(
+        "--per_layer_processing",
+        action="store_true",
+        help="Enable per-layer processing in the hypernet head",
+    )
+    p.add_argument(
+        "--quantize_ctx_encoder",
+        action="store_true",
+        help="4-bit quantize the frozen context encoder to save memory",
     )
 
     p.add_argument(
@@ -240,6 +250,7 @@ def main():
         hypernet_args = HypernetArguments(
             latent_size=args.latent_size,
             per_rank_gen=True,
+            per_layer_processing=args.per_layer_processing,
         )
         aggregator_args = AggregatorArguments(
             n_latent_queries=args.n_latent_queries,
@@ -249,6 +260,7 @@ def main():
         ctx_encoder_args = CtxEncoderArguments(
             ctx_encoder_model_name_or_path=args.ctx_encoder_model,
             ctx_encoder_type=args.ctx_encoder_type,
+            quantize_ctx_encoder=args.quantize_ctx_encoder,
         )
 
         if ctx_encoder_args.layer_idx is None:
@@ -273,9 +285,13 @@ def main():
         p.requires_grad = False
 
     # Enable gradient checkpointing to reduce activation memory
-    model.base_model.gradient_checkpointing_enable()
+    model.base_model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
     if hasattr(model.ctx_encoder, "gradient_checkpointing_enable"):
-        model.ctx_encoder.gradient_checkpointing_enable()
+        model.ctx_encoder.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
 
     if args.compile:
         model.hypernet.compile(fullgraph=True, mode="max-autotune")
@@ -331,7 +347,7 @@ def main():
     )
     logger.info(f"Dataset size after packing: {len(train_ds)}")
 
-    # --- Validation dataset ---
+    # Validation dataset 
     val_ds_name = args.val_dataset or args.dataset
     val_ds_raw = get_tokenized_dataset(
         ds_name=val_ds_name,
@@ -376,6 +392,8 @@ def main():
         save_total_limit=args.save_total_limit,
         eval_strategy="steps",
         eval_steps=eval_steps,
+        batch_eval_metrics=True,
+        include_for_metrics=["inputs"],
         bf16=args.bf16,
         fp16=False,
         report_to="wandb" if args.wandb else "none",

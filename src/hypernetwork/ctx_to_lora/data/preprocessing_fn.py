@@ -3,8 +3,8 @@ import random
 from collections.abc import Callable
 from typing import Any
 
-from ctx_to_lora.data.definitions import CLOSED_QA_INTX_TEMPLATES, EVAL_INTX_TEMPLATES
-from ctx_to_lora.utils import concat_list
+from src.hypernetwork.ctx_to_lora.data.definitions import CLOSED_QA_INTX_TEMPLATES, EVAL_INTX_TEMPLATES
+from src.hypernetwork.ctx_to_lora.utils import concat_list
 
 logger = logging.getLogger()
 

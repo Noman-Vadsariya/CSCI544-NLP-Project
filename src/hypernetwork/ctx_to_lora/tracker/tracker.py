@@ -60,7 +60,7 @@ except Exception:  # pragma: no cover - fallback when executed directly
     if str(_src_root) not in sys.path:
         sys.path.insert(0, str(_src_root))
     try:
-        from ctx_to_lora.tracker.cuda_memory_tracker import (  # type: ignore
+        from src.hypernetwork.ctx_to_lora.tracker.cuda_memory_tracker import (  # type: ignore
             MEMORY_REGISTRY,
             compute_aggregate_memory_stats,
             print_aggregate_memory_stats,
@@ -68,7 +68,7 @@ except Exception:  # pragma: no cover - fallback when executed directly
             reset_memory_trackers,
             save_memory_stats_csv,
         )
-        from ctx_to_lora.tracker.timer import (  # type: ignore
+        from src.hypernetwork.ctx_to_lora.tracker.timer import (  # type: ignore
             TIMER_REGISTRY,
             compute_aggregate_timer_stats,
             print_aggregate_timer_stats,

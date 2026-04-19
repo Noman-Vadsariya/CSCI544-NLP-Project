@@ -4,14 +4,14 @@ import torch
 from peft import PeftConfig
 from torch import nn
 
-from ctx_to_lora.modeling.lora_layer import apply_lora_to_layers, lora_forward
-from ctx_to_lora.modeling.text_to_lora_impl import (
+from src.hypernetwork.ctx_to_lora.modeling.lora_layer import apply_lora_to_layers, lora_forward
+from src.hypernetwork.ctx_to_lora.modeling.text_to_lora_impl import (
     embed_texts,
     get_layers,
     get_peft_config,
     load_hypermod,
 )
-from ctx_to_lora.utils import get_peft_modules
+from src.hypernetwork.ctx_to_lora.utils import get_peft_modules
 
 
 class TextToLoRA(nn.Module):
@@ -118,8 +118,8 @@ class TextToLoRA(nn.Module):
 if __name__ == "__main__":
     from transformers import AutoTokenizer
 
-    from ctx_to_lora.data.definitions import CTX_AFFIXES
-    from ctx_to_lora.data.processing import load_and_process_dataset
+    from src.hypernetwork.ctx_to_lora.data.definitions import CTX_AFFIXES
+    from src.hypernetwork.ctx_to_lora.data.processing import load_and_process_dataset
 
     model_name = "google/gemma-2-2b-it"
     tokenizer = AutoTokenizer.from_pretrained(model_name)

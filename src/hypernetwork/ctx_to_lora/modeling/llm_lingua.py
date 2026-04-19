@@ -2,7 +2,7 @@ import torch
 from llmlingua import PromptCompressor
 from torch import nn
 
-from ctx_to_lora.data.definitions import CTX_AFFIXES
+from src.hypernetwork.ctx_to_lora.data.definitions import CTX_AFFIXES
 
 
 class LLMLinguaModel(nn.Module):
@@ -89,7 +89,7 @@ class LLMLinguaModel(nn.Module):
 
 
 if __name__ == "__main__":
-    from ctx_to_lora.model_loading import get_model_and_tokenizer
+    from src.hypernetwork.ctx_to_lora.model_loading import get_model_and_tokenizer
 
     model, tokenizer = get_model_and_tokenizer(
         "google/gemma-2-2b-it",
