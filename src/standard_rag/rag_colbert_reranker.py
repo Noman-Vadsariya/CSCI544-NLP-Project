@@ -48,7 +48,7 @@ MAX_QUERY_LEN = 64
 MAX_PASSAGE_LEN = 480
 
 # Evaluation
-NUM_SAMPLES = len(queries)
+NUM_SAMPLES = 200
 
 UPSERT_PINECONE = True  # set to False to skip Pinecone upload (use existing index)
 
