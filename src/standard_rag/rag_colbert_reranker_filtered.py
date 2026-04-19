@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import torch.nn.functional as F
 import re
@@ -24,7 +25,7 @@ load_dotenv()
 DATA_PATH = "./data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 
 # Backbone used for both dense retrieval and ColBERT-style token embeddings
-BGE_MODEL_NAME = "BAAI/bge-large-en-v1.5"
+BGE_MODEL_NAME = "checkpoints/bge-large-en-v1.5"
 
 # Chunking
 CHUNK_SIZE = 480
@@ -50,7 +51,10 @@ MAX_PASSAGE_LEN = 480
 # Evaluation
 NUM_SAMPLES = 200
 
-UPSERT_PINECONE = True  # set to False to skip Pinecone upload 
+# Output file for saving retrieved contexts
+RETRIEVED_JSON_PATH = "./data/retrieved/hotpotQA_colbert_retrieved.json"
+
+UPSERT_PINECONE = False  # set to False to skip Pinecone upload
 
 # -------------------------------------------------------------------
 # LOAD DATA
@@ -554,7 +558,9 @@ recall_2 = 0
 recall_5 = 0
 mrr_2_total = 0
 mrr_5_total = 0
-f1_total = 0  
+f1_total = 0
+
+retrieved_records = []
 
 print("\nRunning evaluation...")
 
@@ -567,6 +573,14 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
         top_k=RERANK_TOP_K,
         candidate_k=max(BM25_CANDIDATE_K, DENSE_CANDIDATE_K),
     )
+
+    retrieved_records.append({
+        "id": i,
+        "prompt": query,
+        "full_context": contexts[i],
+        "retrieved_context": retrieved_texts,
+        "answer": true_answer,
+    })
 
     # ---------------- accuracy - EM ----------------
     found_ctx = any(
@@ -595,6 +609,10 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
     f1_total += best_f1
 
 
+    # Generation 
+    # TODO
+
+
 # ---------------- final metrics ----------------
 
 accuracy /= num_samples
@@ -611,3 +629,8 @@ print(f"Recall@5    : {recall_5:.4f}")
 print(f"MRR@2       : {mrr_2:.4f}")
 print(f"MRR@5       : {mrr_5:.4f}")
 print(f"F1 (word)   : {f1_score:.4f}")
+
+Path(RETRIEVED_JSON_PATH).parent.mkdir(parents=True, exist_ok=True)
+with open(RETRIEVED_JSON_PATH, "w") as f:
+    json.dump(retrieved_records, f, indent=2, ensure_ascii=False)
+print(f"\nSaved {len(retrieved_records)} retrieved records to {RETRIEVED_JSON_PATH}")
