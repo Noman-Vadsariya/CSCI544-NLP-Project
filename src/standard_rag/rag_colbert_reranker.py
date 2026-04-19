@@ -1,4 +1,7 @@
+import argparse
 import os
+import json
+import time
 import torch
 import torch.nn.functional as F
 import re
@@ -13,6 +16,13 @@ from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 from pinecone import Pinecone, ServerlessSpec
 from collections import Counter
+
+from src.hypernetwork.inference import (
+    load_baseline,
+    load_hypernet,
+    run_baseline,
+    run_hypernet,
+)
 
 # -------------------------------------------------------------------
 # CONFIG
@@ -48,9 +58,68 @@ MAX_QUERY_LEN = 64
 MAX_PASSAGE_LEN = 480
 
 # Evaluation
-NUM_SAMPLES = 200
+NUM_SAMPLES = 2
 
-UPSERT_PINECONE = True  # set to False to skip Pinecone upload (use existing index)
+UPSERT_PINECONE = False  # set to False to skip Pinecone upload (use existing index)
+
+# -------------------------------------------------------------------
+# CLI ARGS (parsed at module level so setup can use --embedding_model)
+# -------------------------------------------------------------------
+
+def parse_gen_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--pipeline",
+        choices=["doc2lora", "regular", "none"],
+        default="none",
+        help="Generation pipeline: doc2lora (hypernetwork), regular (LLM), or none (skip).",
+    )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Checkpoint/model directory. For doc2lora: hypernet .bin. For regular: HF model dir.",
+    )
+    parser.add_argument(
+        "--embedding_model",
+        type=str,
+        default=None,
+        help=f"Local path or HF repo for the retrieval/ColBERT backbone. Defaults to {BGE_MODEL_NAME}.",
+    )
+    parser.add_argument(
+        "--context_mode",
+        choices=["joined", "per_chunk"],
+        default="joined",
+        help="joined: concat top-K into one context. per_chunk: internalize each retrieved chunk separately (doc2lora only).",
+    )
+    parser.add_argument(
+        "--max_new_tokens",
+        type=int,
+        default=32,
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=None,
+        help="Number of eval samples. Defaults to all available.",
+    )
+    parser.add_argument(
+        "--gen_output",
+        type=str,
+        default="./data/retrieved/hotpotQA_gen_outputs.json",
+    )
+    parser.add_argument(
+        "--retrieved_output",
+        type=str,
+        default="./data/retrieved/hotpotQA_colbert_retrieved.json",
+        help="Path to save retrieved contexts JSON.",
+    )
+    return parser.parse_args()
+
+
+args = parse_gen_args()
+embedding_model_name_or_path = args.embedding_model or BGE_MODEL_NAME
+print(f"Embedding model: {embedding_model_name_or_path}")
 
 # -------------------------------------------------------------------
 # LOAD DATA
@@ -76,12 +145,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 # Dense embedding model for Pinecone retrieval
-dense_model = SentenceTransformer(BGE_MODEL_NAME, device=device)
+dense_model = SentenceTransformer(embedding_model_name_or_path, device=device)
 
 # Raw transformer backbone for token-level late interaction scoring
 # Important: this is NOT SentenceTransformer pooling; we use last_hidden_state.
-tokenizer = AutoTokenizer.from_pretrained(BGE_MODEL_NAME)
-encoder = AutoModel.from_pretrained(BGE_MODEL_NAME).to(device)
+tokenizer = AutoTokenizer.from_pretrained(embedding_model_name_or_path)
+encoder = AutoModel.from_pretrained(embedding_model_name_or_path).to(device)
 encoder.eval()
 
 # -------------------------------------------------------------------
@@ -474,6 +543,100 @@ def compute_f1(prediction, ground_truth):
     return 2 * precision * recall / (precision + recall)
 
 
+def compute_em(prediction, ground_truth):
+    return float(normalize_answer(prediction) == normalize_answer(ground_truth))
+
+
+def compute_containment(prediction, ground_truth):
+    """Gold answer appears as a substring of the (normalized) prediction."""
+    gold_norm = normalize_answer(ground_truth)
+    if not gold_norm:
+        return 0.0
+    return float(gold_norm in normalize_answer(prediction))
+
+
+def extract_answer_span(text, gold):
+    """Post-process free-form LLM output into a short answer span."""
+    if not text:
+        return ""
+
+    gold_norm = normalize_answer(gold)
+
+    # Yes/no shortcut: look at the first word of the raw prediction.
+    first_word = re.split(r"[\s,.!?:;]+", text.strip().lower(), maxsplit=1)[0]
+    if gold_norm in {"yes", "no"} and first_word in {"yes", "no"}:
+        return first_word
+
+    # Strip common markdown.
+    t = text.strip()
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = t.replace("**", "").replace("*", "").replace("`", "")
+
+    # Take the first non-empty line and drop list/heading markers.
+    for line in t.split("\n"):
+        line = re.sub(r"^[\-\*#\d\.\)]+\s*", "", line.strip())
+        if line:
+            t = line
+            break
+
+    # Take the first sentence.
+    m = re.match(r"^(.+?[.!?])(?:\s|$)", t)
+    if m:
+        t = m.group(1).rstrip(".!?")
+
+    return t.strip()
+
+
+HYPERNET_QUERY_PREFIX = (
+    "Answer the question in as few words as possible. "
+    "Only output the answer itself, no explanation or extra text.\n\n"
+)
+
+
+# -------------------------------------------------------------------
+# GENERATION
+# -------------------------------------------------------------------
+
+def load_generator(pipeline: str, model_path: str | None):
+    if pipeline == "doc2lora":
+        return load_hypernet(model_path) if model_path else load_hypernet()
+    if pipeline == "regular":
+        return load_baseline(model_path) if model_path else load_baseline()
+    raise ValueError(f"Unknown pipeline: {pipeline}")
+
+
+def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
+    """Run one generation, return (prediction, latency_sec, peak_mem_mb)."""
+    example = {
+        "context": context,
+        "prompts": [query],
+        "responses": [""],
+    }
+    device = torch.cuda.current_device() if torch.cuda.is_available() else None
+
+    if device is not None:
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+
+    t0 = time.time()
+    if pipeline == "doc2lora":
+        outputs = run_hypernet(model, tokenizer, example, max_new_tokens=max_new_tokens)
+    else:
+        outputs = run_baseline(model, tokenizer, example, max_new_tokens=max_new_tokens)
+
+    if device is not None:
+        torch.cuda.synchronize(device)
+    latency = time.time() - t0
+
+    peak_mem_mb = (
+        torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        if device is not None
+        else 0.0
+    )
+    return outputs[0].strip(), latency, peak_mem_mb
+
+
 # -------------------------------------------------------------------
 # EVALUATION
 # -------------------------------------------------------------------
@@ -490,68 +653,172 @@ def compute_mrr_at_k(scored_pids, answer, k):
             return 1.0 / (i + 1)
     return 0.0
 
+if __name__ == "__main__":
+    num_samples = len(queries) if args.num_samples is None else min(args.num_samples, len(queries))
 
-num_samples = min(NUM_SAMPLES, len(queries))
+    accuracy = 0
+    recall_2 = 0
+    recall_5 = 0
+    mrr_2_total = 0
+    mrr_5_total = 0
+    f1_total = 0
 
-accuracy = 0
-recall_2 = 0
-recall_5 = 0
-mrr_2_total = 0
-mrr_5_total = 0
-f1_total = 0  
+    # Generation metrics
+    run_generation = args.pipeline != "none"
+    gen_em_total = 0.0
+    gen_f1_total = 0.0
+    gen_contain_total = 0.0
+    gen_latencies = []
+    gen_peak_mems = []
+    gen_model = None
+    gen_tokenizer = None
 
-print("\nRunning evaluation...")
+    if run_generation:
+        print(f"\nLoading generator: pipeline={args.pipeline}, model_path={args.model_path}")
+        gen_model, gen_tokenizer = load_generator(args.pipeline, args.model_path)
 
-for i in tqdm(range(num_samples), desc="Eval Progress"):
-    query = queries[i]
-    true_answer = answers[i]
+    retrieved_records = []
 
-    retrieved_texts, scored = retrieve_with_colbert_rerank(
-        query,
-        top_k=RERANK_TOP_K,
-        candidate_k=max(BM25_CANDIDATE_K, DENSE_CANDIDATE_K),
-    )
+    print("\nRunning evaluation...")
 
-    # ---------------- accuracy - EM ----------------
-    found_ctx = any(
-        true_answer.lower() in ctx.lower()
-        or all(word in ctx.lower() for word in true_answer.lower().split())
-        for ctx in retrieved_texts
-    )
+    for i in tqdm(range(num_samples), desc="Eval Progress"):
+        query = queries[i]
+        true_answer = answers[i]
 
-    if found_ctx:
-        accuracy += 1
+        retrieved_texts, scored = retrieve_with_colbert_rerank(
+            query,
+            top_k=RERANK_TOP_K,
+            candidate_k=max(BM25_CANDIDATE_K, DENSE_CANDIDATE_K),
+        )
 
-    # ---------------- recall ----------------
-    recall_2 += compute_recall_at_k(retrieved_texts, true_answer, k=2)
-    recall_5 += compute_recall_at_k(retrieved_texts, true_answer, k=5)
+        record = {
+            "id": i,
+            "prompt": query,
+            "full_context": contexts[i],
+            "retrieved_context": retrieved_texts,
+            "answer": true_answer,
+        }
 
-    # ---------------- mrr ----------------
-    mrr_2_total += compute_mrr_at_k(scored, true_answer, k=2)
-    mrr_5_total += compute_mrr_at_k(scored, true_answer, k=5)
+        # ---------------- accuracy - EM ----------------
+        found_ctx = any(
+            true_answer.lower() in ctx.lower()
+            or all(word in ctx.lower() for word in true_answer.lower().split())
+            for ctx in retrieved_texts
+        )
 
-    # ---------------- F1  ----------------
-    best_f1 = 0.0
-    for ctx in retrieved_texts:
-        f1 = compute_f1(ctx, true_answer)
-        best_f1 = max(best_f1, f1)
+        if found_ctx:
+            accuracy += 1
 
-    f1_total += best_f1
+        # ---------------- recall ----------------
+        recall_2 += compute_recall_at_k(retrieved_texts, true_answer, k=2)
+        recall_5 += compute_recall_at_k(retrieved_texts, true_answer, k=5)
 
+        # ---------------- mrr ----------------
+        mrr_2_total += compute_mrr_at_k(scored, true_answer, k=2)
+        mrr_5_total += compute_mrr_at_k(scored, true_answer, k=5)
 
-# ---------------- final metrics ----------------
+        # ---------------- F1  ----------------
+        best_f1 = 0.0
+        for ctx in retrieved_texts:
+            f1 = compute_f1(ctx, true_answer)
+            best_f1 = max(best_f1, f1)
 
-accuracy /= num_samples
-recall_2 /= num_samples
-recall_5 /= num_samples
-mrr_2 = mrr_2_total / num_samples
-mrr_5 = mrr_5_total / num_samples
-f1_score = f1_total / num_samples  
+        f1_total += best_f1
 
-print("\n===== RESULTS =====")
-print(f"Accuracy@10 : {accuracy:.4f}")
-print(f"Recall@2    : {recall_2:.4f}")
-print(f"Recall@5    : {recall_5:.4f}")
-print(f"MRR@2       : {mrr_2:.4f}")
-print(f"MRR@5       : {mrr_5:.4f}")
-print(f"F1 (word)   : {f1_score:.4f}")  
+        # ---------------- generation ----------------
+        if run_generation:
+            if args.context_mode == "per_chunk" and args.pipeline == "doc2lora":
+                gen_context = list(retrieved_texts)
+            else:
+                gen_context = "\n\n".join(retrieved_texts)
+
+            gen_query = (
+                HYPERNET_QUERY_PREFIX + query
+                if args.pipeline == "doc2lora"
+                else query
+            )
+
+            raw_prediction, latency, peak_mem_mb = generate_answer(
+                args.pipeline,
+                gen_model,
+                gen_tokenizer,
+                gen_context,
+                gen_query,
+                args.max_new_tokens,
+            )
+            prediction = extract_answer_span(raw_prediction, true_answer)
+
+            em = compute_em(prediction, true_answer)
+            f1 = compute_f1(prediction, true_answer)
+            contain = compute_containment(raw_prediction, true_answer)
+            gen_em_total += em
+            gen_f1_total += f1
+            gen_contain_total += contain
+            gen_latencies.append(latency)
+            gen_peak_mems.append(peak_mem_mb)
+
+            record["prediction_raw"] = raw_prediction
+            record["prediction"] = prediction
+            record["gen_em"] = em
+            record["gen_f1"] = f1
+            record["gen_contain"] = contain
+            record["gen_latency_sec"] = latency
+            record["gen_peak_mem_mb"] = peak_mem_mb
+
+        retrieved_records.append(record)
+
+    # ---------------- final metrics ----------------
+
+    accuracy /= num_samples
+    recall_2 /= num_samples
+    recall_5 /= num_samples
+    mrr_2 = mrr_2_total / num_samples
+    mrr_5 = mrr_5_total / num_samples
+    f1_score = f1_total / num_samples
+
+    print("\n===== RETRIEVAL =====")
+    print(f"Accuracy@10 : {accuracy:.4f}")
+    print(f"Recall@2    : {recall_2:.4f}")
+    print(f"Recall@5    : {recall_5:.4f}")
+    print(f"MRR@2       : {mrr_2:.4f}")
+    print(f"MRR@5       : {mrr_5:.4f}")
+    print(f"F1 (word)   : {f1_score:.4f}")
+
+    if run_generation:
+        gen_em = gen_em_total / num_samples
+        gen_f1 = gen_f1_total / num_samples
+        gen_contain = gen_contain_total / num_samples
+        avg_latency = sum(gen_latencies) / len(gen_latencies)
+        avg_peak_mem = sum(gen_peak_mems) / len(gen_peak_mems)
+        max_peak_mem = max(gen_peak_mems)
+
+        print(f"\n===== GENERATION ({args.pipeline}) =====")
+        print(f"Answer EM       : {gen_em:.4f}  (on cleaned prediction)")
+        print(f"Answer F1       : {gen_f1:.4f}  (on cleaned prediction)")
+        print(f"Containment     : {gen_contain:.4f}  (gold in raw prediction)")
+        print(f"Avg latency (s) : {avg_latency:.4f}")
+        print(f"Avg peak mem MB : {avg_peak_mem:.1f}")
+        print(f"Max peak mem MB : {max_peak_mem:.1f}")
+
+        Path(args.gen_output).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.gen_output, "w") as f:
+            json.dump({
+                "pipeline": args.pipeline,
+                "model_path": args.model_path,
+                "summary": {
+                    "answer_em": gen_em,
+                    "answer_f1": gen_f1,
+                    "answer_contain": gen_contain,
+                    "avg_latency_sec": avg_latency,
+                    "avg_peak_mem_mb": avg_peak_mem,
+                    "max_peak_mem_mb": max_peak_mem,
+                    "num_samples": num_samples,
+                },
+                "records": retrieved_records,
+            }, f, indent=2, ensure_ascii=False)
+        print(f"Saved generation results to {args.gen_output}")
+
+    Path(args.retrieved_output).parent.mkdir(parents=True, exist_ok=True)
+    with open(args.retrieved_output, "w") as f:
+        json.dump(retrieved_records, f, indent=2, ensure_ascii=False)
+    print(f"\nSaved {len(retrieved_records)} retrieved records to {args.retrieved_output}")

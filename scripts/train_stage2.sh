@@ -1,7 +1,7 @@
-sbatch slurm/run_gpu2.sbatch src/hypernetwork/train_stage2.py \
-  --checkpoint train_outputs/qwen/stage1_combined_gold_dataset_finetune/pytorch_model.bin \
-  --dataset qwen_combined_gold_dataset \
-  --output_dir train_outputs/qwen/stage2_combined_gold_dataset_finetune \
+sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage2.py \
+  --checkpoint train_outputs/stage1_combined_gold_dataset_finetune/pytorch_model.bin \
+  --dataset combined_gold_dataset \
+  --output_dir train_outputs/stage2_combined_gold_dataset_finetune \
   --num_train_epochs 5 \
   --learning_rate 2e-5 \
   --gradient_accumulation_steps 8 \

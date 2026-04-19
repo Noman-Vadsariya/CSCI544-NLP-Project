@@ -68,8 +68,8 @@ EXAMPLE_INPUT = {
 }
 
 
-def load_hypernet():
-    state_dict = torch.load(HYPERNET_CHECKPOINT, weights_only=False)
+def load_hypernet(checkpoint_path: str = HYPERNET_CHECKPOINT):
+    state_dict = torch.load(checkpoint_path, weights_only=False)
     model = ModulatedPretrainedModel.from_state_dict(
         state_dict, train=False, use_sequence_packing=False
     )
@@ -77,12 +77,12 @@ def load_hypernet():
     return model, tokenizer
 
 
-def load_baseline():
+def load_baseline(model_path: str = BASELINE_MODEL_PATH):
     tokenizer = AutoTokenizer.from_pretrained(
-        BASELINE_MODEL_PATH, extra_special_tokens={}
+        model_path, extra_special_tokens={}
     )
     model = AutoModelForCausalLM.from_pretrained(
-        BASELINE_MODEL_PATH, torch_dtype=torch.bfloat16, device_map="auto"
+        model_path, torch_dtype=torch.bfloat16, device_map="auto"
     )
     model.eval()
     return model, tokenizer
@@ -90,7 +90,12 @@ def load_baseline():
 
 def run_hypernet(model, tokenizer, example, max_new_tokens=512):
     model.reset()
-    model.internalize(example["context"])
+    context = example["context"]
+    if isinstance(context, (list, tuple)):
+        for chunk in context:
+            model.internalize(chunk)
+    else:
+        model.internalize(context)
 
     decoded = []
     for prompt in example["prompts"]:
