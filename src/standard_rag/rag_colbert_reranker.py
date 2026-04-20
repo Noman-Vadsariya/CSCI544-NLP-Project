@@ -793,12 +793,12 @@ if __name__ == "__main__":
         max_peak_mem = max(gen_peak_mems)
 
         print(f"\n===== GENERATION ({args.pipeline}) =====")
-        print(f"Answer EM       : {gen_em:.4f}  (on cleaned prediction)")
-        print(f"Answer F1       : {gen_f1:.4f}  (on cleaned prediction)")
-        print(f"Containment     : {gen_contain:.4f}  (gold in raw prediction)")
-        print(f"Avg latency (s) : {avg_latency:.4f}")
-        print(f"Avg peak mem MB : {avg_peak_mem:.1f}")
-        print(f"Max peak mem MB : {max_peak_mem:.1f}")
+        print(f"Answer EM: {gen_em:.4f}  (on cleaned prediction)")
+        print(f"Answer F1: {gen_f1:.4f}  (on cleaned prediction)")
+        print(f"Containment: {gen_contain:.4f}  (gold in raw prediction)")
+        print(f"Avg latency (s): {avg_latency:.4f}")
+        print(f"Avg peak mem MB: {avg_peak_mem:.1f}")
+        print(f"Max peak mem MB: {max_peak_mem:.1f}")
 
         Path(args.gen_output).parent.mkdir(parents=True, exist_ok=True)
         with open(args.gen_output, "w") as f:
