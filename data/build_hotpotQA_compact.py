@@ -1,6 +1,4 @@
 import gc
-from collections import Counter
-
 from datasets import Dataset, load_dataset
 import pandas as pd
 from tqdm import tqdm
