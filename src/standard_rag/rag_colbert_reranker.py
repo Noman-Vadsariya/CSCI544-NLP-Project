@@ -133,6 +133,7 @@ print("columns:", ds.column_names)
 contexts = ds["context"]
 queries = [x[0] for x in ds["prompts"]]
 answers = [x[0] for x in ds["responses"]]
+golden_contexts = ds["gold_context"]
 
 print("Total QA pairs:", len(queries))
 print("Total contexts:", len(contexts))
@@ -637,37 +638,10 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
     return outputs[0].strip(), latency, peak_mem_mb
 
 
-
-gold_supporting_facts = ds["supporting_facts"] if "supporting_facts" in ds.column_names else None
-
-def extract_gold_sentences(context, supporting_facts):
-    """
-    Convert HotpotQA supporting_facts -> actual sentence text
-    context format:
-    [
-        [title, [sent1, sent2, ...]],
-        ...
-    ]
-    supporting_facts:
-    [
-        [title, sent_idx],
-        ...
-    ]
-    """
-    gold_sentences = []
-
-    # map title -> sentences
-    title_to_sents = {}
-    for item in context:
-        if isinstance(item, list) and len(item) == 2:
-            title, sents = item
-            title_to_sents[title] = sents
-
-    for title, sent_id in supporting_facts:
-        if title in title_to_sents and sent_id < len(title_to_sents[title]):
-            gold_sentences.append(title_to_sents[title][sent_id])
-
-    return gold_sentences
+def extract_gold_sentences(text):
+    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
+    sentences = text.strip().split('\n')
+    return sentences
 
 
 # -------------------------------------------------------------------
@@ -696,7 +670,12 @@ def compute_f1_gold(retrieved_texts, gold_sentences, k):
             f1 = compute_f1(ctx, gold)
             best_f1 = max(best_f1, f1)
     return best_f1
+    
 
+def split_into_sentences(text):
+    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s for s in sentences if s]
 
 # -------------------------------------------------------------------
 # MAIN EXECUTION 
@@ -752,13 +731,7 @@ if __name__ == "__main__":
         }
 
         # ---------------- GOLD SENTENCES ----------------
-        if gold_supporting_facts is not None and isinstance(contexts[i], list):
-            gold_sentences = extract_gold_sentences(
-                contexts[i],
-                gold_supporting_facts[i]
-            )
-        else:
-            gold_sentences = []
+        gold_sentences = extract_gold_sentences(golden_contexts[i])
 
         # ---------------- GOLD RECALL ----------------
         recall_2 += compute_recall_gold(retrieved_texts, gold_sentences, k=2)
