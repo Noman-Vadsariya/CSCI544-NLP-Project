@@ -18,9 +18,16 @@ Pipeline:
 5) Evaluate Recall@k / MRR@k against the gold-context origin
    (chunk_id_to_original[pid] == query's example id), plus token-F1
    of top-k chunks against the gold-context string.
+6) Optionally run a generation pipeline (doc2lora or regular LLM) on
+   the retrieved context and score EM/F1/containment with latency and
+   peak-memory stats (matches src/standard_rag/rag_colbert_reranker.py).
 
-Run:
+Run (retrieval only):
     python neural_rag.py --input ./data/raw_datasets/hotpotQA_compact/test/ds.parquet
+
+Run (with generation):
+    python neural_rag.py --pipeline regular --model_path <hf_model_dir>
+    python neural_rag.py --pipeline doc2lora --model_path <hypernet.bin> --context_mode per_chunk
 """
 
 import argparse
@@ -29,6 +36,7 @@ import json
 import os
 import re
 import string
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -36,8 +44,18 @@ from typing import Any, Dict, List, Sequence, Tuple
 import spacy
 import torch
 from datasets import load_dataset
+from dotenv import load_dotenv
 from tqdm import tqdm
 from transformers import AutoModelForMaskedLM, AutoTokenizer
+
+from src.hypernetwork.inference import (
+    load_baseline,
+    load_hypernet,
+    run_baseline,
+    run_hypernet,
+)
+
+load_dotenv()
 
 DEFAULT_INPUT = "./data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 DEFAULT_OUTPUT = "./data/retrieved/passage_ranker_2_outputs.json"
@@ -261,6 +279,44 @@ def compute_f1(prediction: str, ground_truth: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
+def compute_em(prediction: str, ground_truth: str) -> float:
+    return float(normalize_answer(prediction) == normalize_answer(ground_truth))
+
+
+def compute_containment(prediction: str, ground_truth: str) -> float:
+    gold_norm = normalize_answer(ground_truth)
+    if not gold_norm:
+        return 0.0
+    return float(gold_norm in normalize_answer(prediction))
+
+
+def extract_answer_span(text: str, gold: str) -> str:
+    if not text:
+        return ""
+
+    gold_norm = normalize_answer(gold)
+
+    first_word = re.split(r"[\s,.!?:;]+", text.strip().lower(), maxsplit=1)[0]
+    if gold_norm in {"yes", "no"} and first_word in {"yes", "no"}:
+        return first_word
+
+    t = text.strip()
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = t.replace("**", "").replace("*", "").replace("`", "")
+
+    for line in t.split("\n"):
+        line = re.sub(r"^[\-\*#\d\.\)]+\s*", "", line.strip())
+        if line:
+            t = line
+            break
+
+    m = re.match(r"^(.+?[.!?])(?:\s|$)", t)
+    if m:
+        t = m.group(1).rstrip(".!?")
+
+    return t.strip()
+
+
 def compute_recall_at_k_origin(
     scored_pids: List[Tuple[int, float]],
     gold_example_id: int,
@@ -360,6 +416,58 @@ def rank_query_global(
 
 
 # -------------------------------------------------------------------
+# GENERATION
+# -------------------------------------------------------------------
+
+HYPERNET_QUERY_PREFIX = (
+    "Answer the question in as few words as possible. "
+    "Only output the answer itself, no explanation or extra text.\n\n"
+)
+
+
+def load_generator(pipeline: str, model_path: str | None):
+    if pipeline == "doc2lora":
+        return load_hypernet(model_path) if model_path else load_hypernet()
+    if pipeline == "regular":
+        resolved = model_path
+        if resolved and os.path.isfile(resolved):
+            resolved = os.path.dirname(resolved)
+        return load_baseline(resolved) if resolved else load_baseline()
+    raise ValueError(f"Unknown pipeline: {pipeline}")
+
+
+def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
+    example = {
+        "context": context,
+        "prompts": [query],
+        "responses": [""],
+    }
+    cuda_device = torch.cuda.current_device() if torch.cuda.is_available() else None
+
+    if cuda_device is not None:
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(cuda_device)
+        torch.cuda.synchronize(cuda_device)
+
+    t0 = time.time()
+    if pipeline == "doc2lora":
+        outputs = run_hypernet(model, tokenizer, example, max_new_tokens=max_new_tokens)
+    else:
+        outputs = run_baseline(model, tokenizer, example, max_new_tokens=max_new_tokens)
+
+    if cuda_device is not None:
+        torch.cuda.synchronize(cuda_device)
+    latency = time.time() - t0
+
+    peak_mem_mb = (
+        torch.cuda.max_memory_allocated(cuda_device) / (1024 ** 2)
+        if cuda_device is not None
+        else 0.0
+    )
+    return outputs[0].strip(), latency, peak_mem_mb
+
+
+# -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
 
@@ -380,6 +488,23 @@ def main() -> None:
     parser.add_argument("--corpus_device", type=str, default="cpu",
                         help="Device to hold the passage matrix on (cpu or cuda). CPU is safer for large corpora.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--pipeline",
+        choices=["doc2lora", "regular", "none"],
+        default="none",
+        help="Generation pipeline: doc2lora (hypernetwork), regular (LLM), or none (skip).",
+    )
+    parser.add_argument("--model_path", type=str, default=None,
+                        help="Checkpoint/model directory. For doc2lora: hypernet .bin. For regular: HF model dir.")
+    parser.add_argument(
+        "--context_mode",
+        choices=["joined", "per_chunk"],
+        default="joined",
+        help="joined: concat top-K into one context. per_chunk: pass each retrieved chunk as list (doc2lora only).",
+    )
+    parser.add_argument("--max_new_tokens", type=int, default=32)
+    parser.add_argument("--gen_output", type=str,
+                        default="./data/retrieved/neural_rag_gen_outputs.json")
     args = parser.parse_args()
 
     print(f"Loading data: {args.input}")
@@ -399,12 +524,19 @@ def main() -> None:
     nlp = spacy.load(args.spacy_model)
 
     print("\nBuilding global corpus...")
+    t_chunk = time.time()
     all_chunks, chunk_id_to_original = build_global_corpus(
         contexts, tokenizer, chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap
     )
-    print(f"Total chunks: {len(all_chunks)} (from {len(contexts)} contexts)")
+    chunk_build_sec = time.time() - t_chunk
+    print(f"Total chunks: {len(all_chunks)} (from {len(contexts)} contexts) in {chunk_build_sec:.2f}s")
 
     print("\nEncoding corpus with SPLADE...")
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+    t_encode = time.time()
     passage_vecs = splade_encode(
         all_chunks,
         tokenizer,
@@ -417,7 +549,18 @@ def main() -> None:
     passage_matrix = torch.stack([v.to(dtype=torch.float32) for v in passage_vecs], dim=0)
     corpus_device = torch.device(args.corpus_device)
     passage_matrix = passage_matrix.to(corpus_device)
-    print(f"Passage matrix shape: {tuple(passage_matrix.shape)} on {corpus_device}")
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    corpus_encode_sec = time.time() - t_encode
+    corpus_encode_peak_mb = (
+        torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        if device.type == "cuda" else 0.0
+    )
+    corpus_matrix_mb = (passage_matrix.element_size() * passage_matrix.nelement()) / (1024 ** 2)
+    print(
+        f"Passage matrix shape: {tuple(passage_matrix.shape)} on {corpus_device} "
+        f"(~{corpus_matrix_mb:.1f} MB); SPLADE encode took {corpus_encode_sec:.2f}s"
+    )
 
     recall_1 = 0
     recall_5 = 0
@@ -425,7 +568,22 @@ def main() -> None:
     mrr_10_total = 0.0
     f1_total = 0.0
 
+    run_generation = args.pipeline != "none"
+    gen_em_total = 0.0
+    gen_f1_total = 0.0
+    gen_contain_total = 0.0
+    gen_latencies: List[float] = []
+    gen_peak_mems: List[float] = []
+    gen_model = None
+    gen_tokenizer = None
+
+    if run_generation:
+        print(f"\nLoading generator: pipeline={args.pipeline}, model_path={args.model_path}")
+        gen_model, gen_tokenizer = load_generator(args.pipeline, args.model_path)
+
     retrieved_records: List[Dict[str, Any]] = []
+    retrieval_latencies: List[float] = []
+    retrieval_peak_mems: List[float] = []
 
     print("\nRunning evaluation...")
     for i in tqdm(range(len(questions)), desc="Eval Progress"):
@@ -433,6 +591,10 @@ def main() -> None:
         true_answer = answers[i]
         gold_context = contexts[i]
 
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+            torch.cuda.synchronize(device)
+        t_q = time.time()
         scored_pids = rank_query_global(
             question=query,
             all_chunks=all_chunks,
@@ -446,6 +608,15 @@ def main() -> None:
             seed_passages=args.seed_passages,
             bridge_weight=args.bridge_weight,
         )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        query_latency = time.time() - t_q
+        query_peak_mem_mb = (
+            torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+            if device.type == "cuda" else 0.0
+        )
+        retrieval_latencies.append(query_latency)
+        retrieval_peak_mems.append(query_peak_mem_mb)
 
         recall_1 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=1)
         recall_5 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=5)
@@ -460,17 +631,56 @@ def main() -> None:
             best_f1 = max(best_f1, compute_f1(ctx, gold_context))
         f1_total += best_f1
 
-        retrieved_records.append(
-            {
-                "id": i,
-                "prompt": query,
-                "gold_context": gold_context,
-                "retrieved_context": top_texts,
-                "retrieved_origins": top_origins,
-                "answer": true_answer,
-                "scored_pids": scored_pids[: args.top_k_passages],
-            }
-        )
+        record = {
+            "id": i,
+            "prompt": query,
+            "gold_context": gold_context,
+            "retrieved_context": top_texts,
+            "retrieved_origins": top_origins,
+            "answer": normalize_answer(true_answer),
+            "scored_pids": scored_pids[: args.top_k_passages],
+        }
+
+        if run_generation:
+            if args.context_mode == "per_chunk" and args.pipeline == "doc2lora":
+                gen_context = list(top_texts)
+            else:
+                gen_context = "\n\n".join(top_texts)
+
+            gen_query = (
+                HYPERNET_QUERY_PREFIX + query
+                if args.pipeline == "doc2lora"
+                else query
+            )
+
+            raw_prediction, latency, peak_mem_mb = generate_answer(
+                args.pipeline,
+                gen_model,
+                gen_tokenizer,
+                gen_context,
+                gen_query,
+                args.max_new_tokens,
+            )
+            prediction = extract_answer_span(raw_prediction, true_answer)
+
+            em = compute_em(prediction, true_answer)
+            f1 = compute_f1(prediction, true_answer)
+            contain = compute_containment(raw_prediction, true_answer)
+            gen_em_total += em
+            gen_f1_total += f1
+            gen_contain_total += contain
+            gen_latencies.append(latency)
+            gen_peak_mems.append(peak_mem_mb)
+
+            record["prediction_raw"] = raw_prediction
+            record["prediction"] = normalize_answer(prediction)
+            record["gen_em"] = em
+            record["gen_f1"] = f1
+            record["gen_contain"] = contain
+            record["gen_latency_sec"] = latency
+            record["gen_peak_mem_mb"] = peak_mem_mb
+
+        retrieved_records.append(record)
 
     num_samples = len(questions)
     recall_1 /= num_samples
@@ -486,6 +696,64 @@ def main() -> None:
     print(f"MRR@10         : {mrr_10:.4f}")
     print(f"F1 vs gold ctx : {f1_score:.4f}")
 
+    sorted_latencies = sorted(retrieval_latencies)
+    avg_query_sec = sum(sorted_latencies) / len(sorted_latencies) if sorted_latencies else 0.0
+    p95_idx = max(0, int(0.95 * (len(sorted_latencies) - 1))) if sorted_latencies else 0
+    p95_query_sec = sorted_latencies[p95_idx] if sorted_latencies else 0.0
+    avg_peak_mem_mb_retrieval = (
+        sum(retrieval_peak_mems) / len(retrieval_peak_mems) if retrieval_peak_mems else 0.0
+    )
+    max_peak_mem_mb_retrieval = max(retrieval_peak_mems) if retrieval_peak_mems else 0.0
+
+    print("\n===== RETRIEVAL LATENCY =====")
+    print(f"Corpus build (s)       : {chunk_build_sec:.2f}")
+    print(f"Corpus SPLADE enc (s)  : {corpus_encode_sec:.2f}")
+    print(f"Corpus matrix size MB  : {corpus_matrix_mb:.1f}")
+    print(f"Corpus enc peak mem MB : {corpus_encode_peak_mb:.1f}")
+    print(f"Avg query time (s)     : {avg_query_sec:.4f}")
+    print(f"p95 query time (s)     : {p95_query_sec:.4f}")
+    print(f"Avg peak mem MB        : {avg_peak_mem_mb_retrieval:.1f}")
+    print(f"Max peak mem MB        : {max_peak_mem_mb_retrieval:.1f}")
+
+    if run_generation:
+        gen_em = gen_em_total / num_samples
+        gen_f1 = gen_f1_total / num_samples
+        gen_contain = gen_contain_total / num_samples
+        avg_latency = sum(gen_latencies) / len(gen_latencies)
+        avg_peak_mem = sum(gen_peak_mems) / len(gen_peak_mems)
+        max_peak_mem = max(gen_peak_mems)
+
+        print(f"\n===== GENERATION ({args.pipeline}) =====")
+        print(f"Answer EM      : {gen_em:.4f}  (on cleaned prediction)")
+        print(f"Answer F1      : {gen_f1:.4f}  (on cleaned prediction)")
+        print(f"Containment    : {gen_contain:.4f}  (gold in raw prediction)")
+        print(f"Avg latency (s): {avg_latency:.4f}")
+        print(f"Avg peak mem MB: {avg_peak_mem:.1f}")
+        print(f"Max peak mem MB: {max_peak_mem:.1f}")
+
+        Path(args.gen_output).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.gen_output, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "pipeline": args.pipeline,
+                    "model_path": args.model_path,
+                    "summary": {
+                        "answer_em": gen_em,
+                        "answer_f1": gen_f1,
+                        "answer_contain": gen_contain,
+                        "avg_latency_sec": avg_latency,
+                        "avg_peak_mem_mb": avg_peak_mem,
+                        "max_peak_mem_mb": max_peak_mem,
+                        "num_samples": num_samples,
+                    },
+                    "records": retrieved_records,
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        print(f"Saved generation results to {args.gen_output}")
+
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(
@@ -500,6 +768,14 @@ def main() -> None:
                     "f1_vs_gold_context": f1_score,
                     "num_samples": num_samples,
                     "num_chunks": len(all_chunks),
+                    "corpus_build_sec": chunk_build_sec,
+                    "corpus_encode_sec": corpus_encode_sec,
+                    "corpus_matrix_mb": corpus_matrix_mb,
+                    "corpus_encode_peak_mb": corpus_encode_peak_mb,
+                    "avg_query_sec": avg_query_sec,
+                    "p95_query_sec": p95_query_sec,
+                    "avg_peak_mem_mb_retrieval": avg_peak_mem_mb_retrieval,
+                    "max_peak_mem_mb_retrieval": max_peak_mem_mb_retrieval,
                 },
                 "records": retrieved_records,
             },
