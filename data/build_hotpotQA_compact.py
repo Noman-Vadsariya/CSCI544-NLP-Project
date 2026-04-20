@@ -7,9 +7,9 @@ from tqdm import tqdm
 
 def merge_parquet_file():
     # Replace with your actual file paths
-    file1 = 'data/raw_datasets/raw_hotpotQA/train-0.parquet'
-    file2 = 'data/raw_datasets/raw_hotpotQA/train-1.parquet'
-    output_file = 'data/raw_datasets/raw_hotpotQA/train.parquet'
+    file1 = 'raw_datasets/raw_hotpotQA/train-0.parquet'
+    file2 = 'raw_datasets/raw_hotpotQA/train-1.parquet'
+    output_file = 'raw_datasets/raw_hotpotQA/train.parquet'
 
     # Read both Parquet files
     df1 = pd.read_parquet(file1)
@@ -22,10 +22,10 @@ def merge_parquet_file():
     merged_df.to_parquet(output_file)
 
 if __name__ == "__main__":
-    ds_name = "data/raw_datasets/raw_hotpotQA"
+    ds_name = "raw_datasets/raw_hotpotQA"
     # merge_parquet_file()
     # for split in ["train", "test"]:
-    for split in ["test"]:
+    for split in ["train", "test"]:
         ctx_qa_dict = dict()
         ds = load_dataset(ds_name, split=split)
         for i, sample in tqdm(enumerate(ds)):
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         # save to a new dataset
         ds = Dataset.from_list(samples)
 
-        save_path = f"./data/raw_datasets/hotpotQA_gold_compact/{split}/ds.parquet"
+        save_path = f"raw_datasets/hotpotQA_gold_compact/{split}/ds.parquet"
         print(f"Saving dataset to {save_path}")
         ds.to_parquet(save_path)
         print("=" * 80)
