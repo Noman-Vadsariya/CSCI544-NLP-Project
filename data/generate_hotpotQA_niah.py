@@ -9,7 +9,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List
-
+import pandas as pd
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
@@ -309,6 +309,16 @@ def main() -> None:
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
     print(f"Generated {len(samples)} samples total at {out_dir}")
+
+    # Replace with your actual file paths
+    jsonl_path = "raw_datasets/hotpotQA_niah/test.jsonl"
+    parquet_path = "raw_datasets/hotpotQA_niah/test.parquet"
+
+    # Read JSONL
+    df = pd.read_json(jsonl_path, lines=True)
+
+    # Save as Parquet
+    df.to_parquet(parquet_path)
     # print(f"train={len(train)} val={len(val)} test={len(test)}")
 
 
