@@ -710,7 +710,8 @@ if __name__ == "__main__":
     recall_5 = 0
     mrr_2_total = 0
     mrr_5_total = 0
-    f1_total = 0
+    f1_2_total = 0
+    f1_5_total = 0
 
     # generation setup
     run_generation = args.pipeline != "none"
@@ -768,9 +769,8 @@ if __name__ == "__main__":
         mrr_5_total += compute_mrr_gold(retrieved_texts, gold_sentences, k=5)
 
         # ---------------- GOLD F1 ----------------
-        f1_2 = compute_f1_gold(retrieved_texts, gold_sentences, k=2)
-        f1_5 = compute_f1_gold(retrieved_texts, gold_sentences, k=5)
-        f1_total += (f1_2 + f1_5) / 2
+        f1_2_total += compute_f1_gold(retrieved_texts, gold_sentences, k=2)
+        f1_5_total += compute_f1_gold(retrieved_texts, gold_sentences, k=5)
 
         # ---------------- GENERATION ----------------
         if run_generation:
@@ -824,14 +824,16 @@ if __name__ == "__main__":
     recall_5 /= num_samples
     mrr_2 = mrr_2_total / num_samples
     mrr_5 = mrr_5_total / num_samples
-    f1_score = f1_total / num_samples
+    f1_2 = f1_2_total / num_samples
+    f1_5 = f1_5_total / num_samples
 
     print("\n===== RETRIEVAL (GOLD-BASED) =====")
     print(f"Recall@2    : {recall_2:.4f}")
     print(f"Recall@5    : {recall_5:.4f}")
     print(f"MRR@2       : {mrr_2:.4f}")
     print(f"MRR@5       : {mrr_5:.4f}")
-    print(f"F1@2/5(avg) : {f1_score:.4f}")
+    print(f"F1@2       : {f1_2:.4f}")
+    print(f"F1@5       : {f1_5:.4f}")
 
     if run_generation:
         gen_em = gen_em_total / num_samples
