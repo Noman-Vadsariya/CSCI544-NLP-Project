@@ -15,5 +15,9 @@ test.py
 # data/raw_datasets/**/*.parquet
 # **/*.jsonl
 # **/*.json
+src/evaluation/hotpot_gold.json
+src/evaluation/hotpot_hypernet_outputs.jsonl
+src/evaluation/hotpot_pred.json
+data/retrieved/
 google/
 test.py
