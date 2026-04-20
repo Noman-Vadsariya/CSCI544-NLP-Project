@@ -109,18 +109,25 @@ def load_processed_dataset(input_path: str):
     return ds
 
 
-def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str]]:
-    if "context" not in ds.column_names or "prompts" not in ds.column_names or "responses" not in ds.column_names:
+def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List[str]]:
+    if "context" not in ds.column_names or "prompts" not in ds.column_names or "responses" not in ds.column_names or "gold_context" not in ds.column_names:
         raise ValueError(
-            "Expected columns: context, prompts, responses. "
+            "Expected columns: context, prompts, responses, gold_context. "
             f"Found columns: {ds.column_names}"
         )
 
     contexts = []
+    gold_contexts = []
     for c in ds["context"]:
         if isinstance(c, (list, tuple)):
             c = " ".join(str(x) for x in c)
         contexts.append(normalize_text(c))
+
+    for gc in ds["gold_context"]:
+        if isinstance(gc, (list, tuple)):
+            gc = " ".join(str(x) for x in gc)
+        gold_contexts.append(normalize_text(gc))
+
     questions = []
     answers = []
 
@@ -132,7 +139,7 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str]]:
         questions.append(normalize_text(q))
         answers.append(normalize_text(a))
 
-    return contexts, questions, answers
+    return contexts, questions, answers, gold_contexts
 
 
 # -------------------------------------------------------------------
@@ -512,7 +519,7 @@ def main() -> None:
     if args.max_examples > 0:
         ds = ds.select(range(min(args.max_examples, len(ds))))
 
-    contexts, questions, answers = get_examples_from_dataset(ds)
+    contexts, questions, answers, gold_contexts = get_examples_from_dataset(ds)
     print(f"Loaded {len(questions)} examples")
     print(f"Columns: {ds.column_names}")
     print(f"Loading model: {args.model}")
@@ -562,10 +569,12 @@ def main() -> None:
         f"(~{corpus_matrix_mb:.1f} MB); SPLADE encode took {corpus_encode_sec:.2f}s"
     )
 
-    recall_1 = 0
+    recall_2 = 0
     recall_5 = 0
     recall_10 = 0
-    mrr_10_total = 0.0
+    mrr_2 = 0.0
+    mrr_5 = 0.0
+    mrr_10 = 0.0
     f1_total = 0.0
 
     run_generation = args.pipeline != "none"
@@ -589,7 +598,8 @@ def main() -> None:
     for i in tqdm(range(len(questions)), desc="Eval Progress"):
         query = questions[i]
         true_answer = answers[i]
-        gold_context = contexts[i]
+        # context = contexts[i]
+        gold_context = gold_contexts[i]
 
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
@@ -618,10 +628,12 @@ def main() -> None:
         retrieval_latencies.append(query_latency)
         retrieval_peak_mems.append(query_peak_mem_mb)
 
-        recall_1 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=1)
+        recall_2 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=2)
         recall_5 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=5)
         recall_10 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=10)
-        mrr_10_total += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=10)
+        mrr_2 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=2)
+        mrr_5 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=5)
+        mrr_10 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=10)
 
         top_texts = [all_chunks[pid] for pid, _ in scored_pids[: args.top_k_passages]]
         top_origins = [chunk_id_to_original[pid] for pid, _ in scored_pids[: args.top_k_passages]]
@@ -683,17 +695,21 @@ def main() -> None:
         retrieved_records.append(record)
 
     num_samples = len(questions)
-    recall_1 /= num_samples
+    recall_2 /= num_samples
     recall_5 /= num_samples
     recall_10 /= num_samples
-    mrr_10 = mrr_10_total / num_samples
+    mrr_2 = mrr_2 / num_samples
+    mrr_5 = mrr_5 / num_samples
+    mrr_10 = mrr_10 / num_samples
     f1_score = f1_total / num_samples
 
     print("\n===== RETRIEVAL (gold = originating context) =====")
-    print(f"Recall@1       : {recall_1:.4f}")
+    print(f"Recall@2       : {recall_2:.4f}")
     print(f"Recall@5       : {recall_5:.4f}")
     print(f"Recall@10      : {recall_10:.4f}")
-    print(f"MRR@10         : {mrr_10:.4f}")
+    print(f"MRR@2         : {mrr_2:.4f}")
+    print(f"MRR@5         : {mrr_5:.4f}")
+    print(f"MRR@10        : {mrr_10:.4f}")
     print(f"F1 vs gold ctx : {f1_score:.4f}")
 
     sorted_latencies = sorted(retrieval_latencies)
@@ -761,9 +777,11 @@ def main() -> None:
                 "model": args.model,
                 "input": args.input,
                 "summary": {
-                    "recall_at_1": recall_1,
+                    "recall_at_2": recall_2,
                     "recall_at_5": recall_5,
                     "recall_at_10": recall_10,
+                    "mrr_at_2": mrr_2,
+                    "mrr_at_5": mrr_5,
                     "mrr_at_10": mrr_10,
                     "f1_vs_gold_context": f1_score,
                     "num_samples": num_samples,

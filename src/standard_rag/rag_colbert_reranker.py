@@ -133,7 +133,7 @@ print("columns:", ds.column_names)
 contexts = ds["context"]
 queries = [x[0] for x in ds["prompts"]]
 answers = [x[0] for x in ds["responses"]]
-golden_contexts = ds["gold_context"]
+gold_contexts = ds["gold_context"]
 
 print("Total QA pairs:", len(queries))
 print("Total contexts:", len(contexts))
@@ -725,7 +725,7 @@ if __name__ == "__main__":
         }
 
         # ---------------- GOLD SENTENCES ----------------
-        gold_sentences = extract_gold_sentences(golden_contexts[i])
+        gold_sentences = extract_gold_sentences(gold_contexts[i])
 
         # ---------------- GOLD RECALL ----------------
         recall_2 += compute_recall_gold(retrieved_texts, gold_sentences, k=2)
