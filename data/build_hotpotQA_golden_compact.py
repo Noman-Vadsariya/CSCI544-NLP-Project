@@ -1,4 +1,6 @@
 import gc
+from collections import Counter
+
 from datasets import Dataset, load_dataset
 import pandas as pd
 from tqdm import tqdm
@@ -27,17 +29,23 @@ if __name__ == "__main__":
         ctx_qa_dict = dict()
         ds = load_dataset(ds_name, split=split)
         for i, sample in tqdm(enumerate(ds)):
+            gold_titles = Counter(sample["supporting_facts"]["title"])
             sentences = []
-            for sent in sample["context"]["sentences"]:
+            gold_sentences = []
+            for title, sent in zip(sample["context"]["title"], sample["context"]["sentences"]):
+                if title in gold_titles:
+                    gold_sentences.extend(sent)
                 sentences.extend(sent)
 
             response = sample["answer"]
             ctx = "\n".join(sentences)
+            gold_ctx = "\n".join(gold_sentences)
             q = sample["question"]
             if ctx not in ctx_qa_dict:
-                ctx_qa_dict[ctx] = {"prompts": [], "responses": []}
+                ctx_qa_dict[ctx] = {"prompts": [], "responses": [], "gold_context": ""}
             ctx_qa_dict[ctx]["prompts"].append(q)
             ctx_qa_dict[ctx]["responses"].append(response)
+            ctx_qa_dict[ctx]["gold_context"] = gold_ctx
 
         print(f"Unique contexts: {len(ctx_qa_dict)}")
         # convert ctx_qa_dict to a list of dictionaries
@@ -46,6 +54,7 @@ if __name__ == "__main__":
                 "context": ctx,
                 "prompts": ctx_qa_dict[ctx]["prompts"],
                 "responses": ctx_qa_dict[ctx]["responses"],
+                "gold_context": ctx_qa_dict[ctx]["gold_context"],
             }
             for ctx in ctx_qa_dict
         ]

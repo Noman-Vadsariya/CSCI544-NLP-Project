@@ -133,6 +133,7 @@ print("columns:", ds.column_names)
 contexts = ds["context"]
 queries = [x[0] for x in ds["prompts"]]
 answers = [x[0] for x in ds["responses"]]
+golden_contexts = ds["gold_context"]
 
 print("Total QA pairs:", len(queries))
 print("Total contexts:", len(contexts))
@@ -637,44 +638,73 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
     return outputs[0].strip(), latency, peak_mem_mb
 
 
+def extract_gold_sentences(text):
+    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
+    sentences = text.strip().split('\n')
+    return sentences
+
+
 # -------------------------------------------------------------------
-# EVALUATION
+# GOLD METRICS
 # -------------------------------------------------------------------
 
-def compute_recall_at_k(ranked_texts, answer, k):
-    top_k = ranked_texts[:k]
-    return int(any(answer.lower() in ctx.lower() for ctx in top_k))
+def compute_recall_gold(retrieved_texts, gold_sentences, k):
+    top_k = retrieved_texts[:k]
+    return int(any(
+        any(gold.lower() in ctx.lower() for ctx in top_k)
+        for gold in gold_sentences
+    ))
 
 
-def compute_mrr_at_k(scored_pids, answer, k):
-    for i, (pid, _) in enumerate(scored_pids[:k]):
-        text = pid_to_text[pid]
-        if answer.lower() in text.lower():
+def compute_mrr_gold(retrieved_texts, gold_sentences, k):
+    for i, ctx in enumerate(retrieved_texts[:k]):
+        if any(gold.lower() in ctx.lower() for gold in gold_sentences):
             return 1.0 / (i + 1)
     return 0.0
 
+
+def compute_f1_gold(retrieved_texts, gold_sentences, k):
+    best_f1 = 0.0
+    for ctx in retrieved_texts[:k]:
+        for gold in gold_sentences:
+            f1 = compute_f1(ctx, gold)
+            best_f1 = max(best_f1, f1)
+    return best_f1
+    
+
+def split_into_sentences(text):
+    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s for s in sentences if s]
+
+# -------------------------------------------------------------------
+# MAIN EXECUTION 
+# -------------------------------------------------------------------
+
 if __name__ == "__main__":
+
     num_samples = len(queries) if args.num_samples is None else min(args.num_samples, len(queries))
 
-    accuracy = 0
     recall_2 = 0
     recall_5 = 0
     mrr_2_total = 0
     mrr_5_total = 0
-    f1_total = 0
+    f1_2_total = 0
+    f1_5_total = 0
 
-    # Generation metrics
+    # generation setup
     run_generation = args.pipeline != "none"
     gen_em_total = 0.0
     gen_f1_total = 0.0
     gen_contain_total = 0.0
     gen_latencies = []
     gen_peak_mems = []
+
     gen_model = None
     gen_tokenizer = None
 
     if run_generation:
-        print(f"\nLoading generator: pipeline={args.pipeline}, model_path={args.model_path}")
+        print(f"\nLoading generator: pipeline={args.pipeline}")
         gen_model, gen_tokenizer = load_generator(args.pipeline, args.model_path)
 
     retrieved_records = []
@@ -682,6 +712,7 @@ if __name__ == "__main__":
     print("\nRunning evaluation...")
 
     for i in tqdm(range(num_samples), desc="Eval Progress"):
+
         query = queries[i]
         true_answer = answers[i]
 
@@ -699,34 +730,24 @@ if __name__ == "__main__":
             "answer": true_answer,
         }
 
-        # ---------------- accuracy - EM ----------------
-        found_ctx = any(
-            true_answer.lower() in ctx.lower()
-            or all(word in ctx.lower() for word in true_answer.lower().split())
-            for ctx in retrieved_texts
-        )
+        # ---------------- GOLD SENTENCES ----------------
+        gold_sentences = extract_gold_sentences(golden_contexts[i])
 
-        if found_ctx:
-            accuracy += 1
+        # ---------------- GOLD RECALL ----------------
+        recall_2 += compute_recall_gold(retrieved_texts, gold_sentences, k=2)
+        recall_5 += compute_recall_gold(retrieved_texts, gold_sentences, k=5)
 
-        # ---------------- recall ----------------
-        recall_2 += compute_recall_at_k(retrieved_texts, true_answer, k=2)
-        recall_5 += compute_recall_at_k(retrieved_texts, true_answer, k=5)
+        # ---------------- GOLD MRR ----------------
+        mrr_2_total += compute_mrr_gold(retrieved_texts, gold_sentences, k=2)
+        mrr_5_total += compute_mrr_gold(retrieved_texts, gold_sentences, k=5)
 
-        # ---------------- mrr ----------------
-        mrr_2_total += compute_mrr_at_k(scored, true_answer, k=2)
-        mrr_5_total += compute_mrr_at_k(scored, true_answer, k=5)
+        # ---------------- GOLD F1 ----------------
+        f1_2_total += compute_f1_gold(retrieved_texts, gold_sentences, k=2)
+        f1_5_total += compute_f1_gold(retrieved_texts, gold_sentences, k=5)
 
-        # ---------------- F1  ----------------
-        best_f1 = 0.0
-        for ctx in retrieved_texts:
-            f1 = compute_f1(ctx, true_answer)
-            best_f1 = max(best_f1, f1)
-
-        f1_total += best_f1
-
-        # ---------------- generation ----------------
+        # ---------------- GENERATION ----------------
         if run_generation:
+
             if args.context_mode == "per_chunk" and args.pipeline == "doc2lora":
                 gen_context = list(retrieved_texts)
             else:
@@ -746,43 +767,46 @@ if __name__ == "__main__":
                 gen_query,
                 args.max_new_tokens,
             )
+
             prediction = extract_answer_span(raw_prediction, true_answer)
 
             em = compute_em(prediction, true_answer)
             f1 = compute_f1(prediction, true_answer)
             contain = compute_containment(raw_prediction, true_answer)
+
             gen_em_total += em
             gen_f1_total += f1
             gen_contain_total += contain
             gen_latencies.append(latency)
             gen_peak_mems.append(peak_mem_mb)
 
-            record["prediction_raw"] = raw_prediction
-            record["prediction"] = prediction
-            record["gen_em"] = em
-            record["gen_f1"] = f1
-            record["gen_contain"] = contain
-            record["gen_latency_sec"] = latency
-            record["gen_peak_mem_mb"] = peak_mem_mb
+            record.update({
+                "prediction": prediction,
+                "gen_em": em,
+                "gen_f1": f1,
+                "gen_contain": contain,
+                "latency": latency,
+                "mem": peak_mem_mb,
+            })
 
         retrieved_records.append(record)
 
-    # ---------------- final metrics ----------------
+    # ---------------- FINAL METRICS ----------------
 
-    accuracy /= num_samples
     recall_2 /= num_samples
     recall_5 /= num_samples
     mrr_2 = mrr_2_total / num_samples
     mrr_5 = mrr_5_total / num_samples
-    f1_score = f1_total / num_samples
+    f1_2 = f1_2_total / num_samples
+    f1_5 = f1_5_total / num_samples
 
-    print("\n===== RETRIEVAL =====")
-    print(f"Accuracy@10 : {accuracy:.4f}")
+    print("\n===== RETRIEVAL (GOLD-BASED) =====")
     print(f"Recall@2    : {recall_2:.4f}")
     print(f"Recall@5    : {recall_5:.4f}")
     print(f"MRR@2       : {mrr_2:.4f}")
     print(f"MRR@5       : {mrr_5:.4f}")
-    print(f"F1 (word)   : {f1_score:.4f}")
+    print(f"F1@2       : {f1_2:.4f}")
+    print(f"F1@5       : {f1_5:.4f}")
 
     if run_generation:
         gen_em = gen_em_total / num_samples
