@@ -18,6 +18,12 @@ Example (from scratch with a base model):
         --model_name google/gemma-2-2b-it \
         --dataset combined_noisy_dataset \
         --output_dir train_outputs/stage2_scratch
+
+Example (resume a stage 2 run from a Trainer checkpoint folder):
+    uv run python3 src/hypernetwork/train_stage2.py \
+        --resume_from_checkpoint train_outputs/stage2_combined_gold_dataset_finetune/checkpoint-5000 \
+        --dataset combined_gold_dataset \
+        --output_dir train_outputs/stage2_combined_gold_dataset_finetune
 """
 
 import argparse
@@ -77,12 +83,21 @@ logger = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser(description="Stage 2 hypernet training (multi-chunk)")
 
-    # Model either from --checkpoint OR --model_name (from scratch)
+    # Model either from --checkpoint OR --model_name (from scratch) OR
+    # --resume_from_checkpoint (folder with Trainer state + pytorch_model.bin)
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--checkpoint", help="Path to pytorch_model.bin checkpoint")
     source.add_argument(
         "--model_name",
         help="HuggingFace model name to init from scratch (e.g. google/gemma-2-2b-it)",
+    )
+    source.add_argument(
+        "--resume_from_checkpoint",
+        help=(
+            "Path to a Trainer checkpoint folder (e.g. .../checkpoint-5000). "
+            "Loads model weights from pytorch_model.bin inside the folder and "
+            "restores optimizer/scheduler/global_step via the HF Trainer."
+        ),
     )
 
     # From-scratch hypernetwork config
@@ -246,9 +261,24 @@ def main():
             int(k): float(v) for k, v in json.loads(args.num_chunk_probs).items()
         }
 
-    if args.checkpoint:
-        logger.info(f"Loading checkpoint: {args.checkpoint}")
-        state_dict = torch.load(args.checkpoint, weights_only=False)
+    if args.checkpoint or args.resume_from_checkpoint:
+        if args.resume_from_checkpoint:
+            if not os.path.isdir(args.resume_from_checkpoint):
+                raise ValueError(
+                    f"--resume_from_checkpoint must be a directory, got: "
+                    f"{args.resume_from_checkpoint}"
+                )
+            ckpt_bin = os.path.join(args.resume_from_checkpoint, "pytorch_model.bin")
+            if not os.path.isfile(ckpt_bin):
+                raise FileNotFoundError(
+                    f"Expected pytorch_model.bin inside {args.resume_from_checkpoint}"
+                )
+            logger.info(f"Resuming from Trainer checkpoint folder: {args.resume_from_checkpoint}")
+        else:
+            ckpt_bin = args.checkpoint
+            logger.info(f"Loading checkpoint: {ckpt_bin}")
+
+        state_dict = torch.load(ckpt_bin, weights_only=False)
         model = ModulatedPretrainedModel.from_state_dict(state_dict, train=True)
 
         tokenizer = get_tokenizer(model.base_model.config.name_or_path, train=True)
@@ -432,6 +462,7 @@ def main():
         remove_unused_columns=False,
         seed=args.seed,
         run_name=os.path.basename(args.output_dir),
+        resume_from_checkpoint=args.resume_from_checkpoint,
     )
 
     # Trainer-specific custom args
