@@ -29,9 +29,11 @@ if __name__ == "__main__":
         ctx_qa_dict = dict()
         ds = load_dataset(ds_name, split=split)
         for i, sample in tqdm(enumerate(ds)):
+            gold_titles = Counter(sample["supporting_facts"]["title"])
             sentences = []
-            for sent in sample["context"]["sentences"]:
-                sentences.extend(sent)
+            for title, sent in zip(sample["context"]["title"], sample["context"]["sentences"]):
+                if title in gold_titles:
+                    sentences.extend(sent)
 
             response = sample["answer"]
             ctx = "\n".join(sentences)
@@ -56,7 +58,7 @@ if __name__ == "__main__":
         # save to a new dataset
         ds = Dataset.from_list(samples)
 
-        save_path = f"raw_datasets/hotpotQA_compact/{split}/ds.parquet"
+        save_path = f"raw_datasets/hotpotQA_gold_compact/{split}/ds.parquet"
         print(f"Saving dataset to {save_path}")
         ds.to_parquet(save_path)
         print("=" * 80)

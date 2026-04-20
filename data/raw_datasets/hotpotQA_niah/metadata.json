@@ -1,0 +1,14 @@
+{
+  "seed": 42,
+  "data_path": "raw_datasets/hotpotQA_compact/test/ds.parquet",
+  "tokenizer_name": "google/gemma-2-2b-it",
+  "chunk_size": 40,
+  "chunk_overlap": 8,
+  "n_samples": 10000,
+  "n_distractors": 25,
+  "max_chunks_per_example": 4,
+  "train_ratio": 0.0,
+  "val_ratio": 0.5,
+  "fixed_noise_only": false,
+  "note": "Needle / prompt / 4-digit answer follow the Doc-to-LoRA NIAH recipe; distractors are HotpotQA chunks unless --fixed-noise-only is set."
+}
