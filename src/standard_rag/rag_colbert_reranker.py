@@ -638,12 +638,6 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
     return outputs[0].strip(), latency, peak_mem_mb
 
 
-def extract_gold_sentences(text):
-    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
-    sentences = text.strip().split('\n')
-    return sentences
-
-
 # -------------------------------------------------------------------
 # GOLD METRICS
 # -------------------------------------------------------------------
@@ -672,10 +666,10 @@ def compute_f1_gold(retrieved_texts, gold_sentences, k):
     return best_f1
     
 
-def split_into_sentences(text):
+def extract_gold_sentences(text):
     # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s for s in sentences if s]
+    sentences = text.strip().split('\n')
+    return sentences
 
 # -------------------------------------------------------------------
 # MAIN EXECUTION 
