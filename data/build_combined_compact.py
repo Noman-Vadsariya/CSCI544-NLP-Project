@@ -5,15 +5,6 @@ from datasets import Dataset, concatenate_datasets, Value
 def combine_and_shuffle_parquet_files(
     dataset_folders, output_train_path, output_test_path
 ):
-    """
-    Combines all train and test .parquet files in the specified dataset folders,
-    shuffles them, and saves the combined datasets.
-
-    Args:
-        dataset_folders (list): List of dataset folder paths to combine.
-        output_train_path (str): Path to save the combined train dataset.
-        output_test_path (str): Path to save the combined test dataset.
-    """
     train_datasets = []
     test_datasets = []
 

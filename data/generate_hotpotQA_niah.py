@@ -19,10 +19,7 @@ SPECIAL_TPL = "The special magic number is {magic_number}."
 PROMPT = "What is the special magic number? Reply with only the number."
 SEP = "\n"
 
-# This is the paper/repo's fixed distractor sentence; we keep it available
-# for exact-style baseline generation.
 NOISE_BLOCK = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
-
 
 @dataclass
 class NIAHSample:
@@ -277,9 +274,6 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # For a small first test, default is split into val/test only.
-    # train, val, test = split_train_val_test(samples, args.train_ratio, args.val_ratio, seed=args.seed)
 
     if args.dry_run:
         print(json.dumps(asdict(samples[0]), indent=2, ensure_ascii=False))
