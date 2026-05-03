@@ -9,10 +9,10 @@ Input format:
       - responses: [answer]
 
 Pipeline:
-1) Chunk every example's context and build one global corpus.
+1) Split every example's context into chunks and combine all chunks into one global corpus.
 2) SPLADE-encode every chunk once.
-3) For each question, score chunks against the full corpus.
-4) Use top seeds to build bridge queries, then re-rank.
+3) SPLADE-encode the query, and retrieve a ranked list of similar chunks from the corpus.
+4) Use top-ranked chunks to build bridge queries, then re-rank the list of retrieved chunks.
 5) Evaluate Recall@k / MRR@k against the gold-context origin, plus token-F1 of top-k chunks against the gold-context string.
 6) Run the generation pipeline on the retrieved context and score EM/F1/containment with latency and peak-memory stats.
 
