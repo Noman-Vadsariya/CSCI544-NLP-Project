@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-neural_rag.py
-
-Multi-hop SPLADE passage ranker over a GLOBAL corpus.
+SPLADE passage ranker over a GLOBAL corpus.
 
 Input format:
     parquet / HF dataset rows with columns:
@@ -15,12 +13,8 @@ Pipeline:
 2) SPLADE-encode every chunk once.
 3) For each question, score chunks against the full corpus.
 4) Use top seeds to build bridge queries, then re-rank.
-5) Evaluate Recall@k / MRR@k against the gold-context origin
-   (chunk_id_to_original[pid] == query's example id), plus token-F1
-   of top-k chunks against the gold-context string.
-6) Optionally run a generation pipeline (doc2lora or regular LLM) on
-   the retrieved context and score EM/F1/containment with latency and
-   peak-memory stats (matches src/standard_rag/rag_colbert_reranker.py).
+5) Evaluate Recall@k / MRR@k against the gold-context origin, plus token-F1 of top-k chunks against the gold-context string.
+6) Run the generation pipeline on the retrieved context and score EM/F1/containment with latency and peak-memory stats.
 
 Run (retrieval only):
     python neural_rag.py --input ./data/raw_datasets/hotpotQA_compact/test/ds.parquet
@@ -35,9 +29,7 @@ import html
 import json
 import os
 import re
-import string
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
@@ -54,6 +46,15 @@ from src.hypernetwork.inference import (
     run_baseline,
     run_hypernet,
 )
+from src.evaluation.retrieval_aware import (
+    apply_refusal_credit,
+    compute_containment,
+    compute_em,
+    compute_f1,
+    compute_rouge_l,
+    gold_in_retrieved,
+    normalize_answer,
+)
 
 load_dotenv()
 
@@ -63,8 +64,11 @@ DEFAULT_MODEL = "naver/splade-cocondenser-ensembledistil"
 DEFAULT_SPACY_MODEL = "en_core_web_sm"
 DEFAULT_CHUNK_SIZE = 480
 DEFAULT_CHUNK_OVERLAP = 80
-DEFAULT_TOP_K = 10
+DEFAULT_TOP_K = 20
 DEFAULT_SEED_PASSAGES = 3
+
+# k values evaluated for retrieval and generation
+K_VALUES = (20,)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -77,22 +81,6 @@ def normalize_text(text: Any) -> str:
     text = html.unescape(str(text or ""))
     text = re.sub(r"\s+", " ", text).strip()
     return text
-
-
-def normalize_answer(text: str) -> str:
-    def remove_articles(t: str) -> str:
-        return re.sub(r"\b(a|an|the)\b", " ", t)
-
-    def white_space_fix(t: str) -> str:
-        return " ".join(t.split())
-
-    def remove_punc(t: str) -> str:
-        return "".join(ch for ch in t if ch not in set(string.punctuation))
-
-    def lower(t: str) -> str:
-        return t.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(text))))
 
 
 def load_processed_dataset(input_path: str):
@@ -109,21 +97,44 @@ def load_processed_dataset(input_path: str):
     return ds
 
 
-def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List[str]]:
-    if "context" not in ds.column_names or "prompts" not in ds.column_names or "responses" not in ds.column_names or "gold_context" not in ds.column_names:
+def _split_gold_sentences(raw) -> List[str]:
+    """Extract non-empty sentence strings from a raw gold_context field.
+
+    Normalizes whitespace within each sentence so substring matches line up with retrieved chunks
+    """
+    if isinstance(raw, (list, tuple)):
+        items = [str(x) for x in raw]
+    else:
+        items = str(raw or "").split("\n")
+    return [normalize_text(s) for s in items if s and str(s).strip()]
+
+
+def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List[str], List[List[str]]]:
+    required = {"context", "prompts", "responses"}
+    if not required.issubset(ds.column_names):
         raise ValueError(
-            "Expected columns: context, prompts, responses, gold_context. "
+            "Expected columns: context, prompts, responses (and gold_context or needle_text). "
             f"Found columns: {ds.column_names}"
         )
 
+    if "gold_context" in ds.column_names:
+        gold_field = "gold_context"
+    elif "needle_text" in ds.column_names:
+        gold_field = "needle_text"
+    else:
+        gold_field = "context"
+
     contexts = []
     gold_contexts = []
+    gold_sentences_list: List[List[str]] = []
     for c in ds["context"]:
         if isinstance(c, (list, tuple)):
             c = " ".join(str(x) for x in c)
         contexts.append(normalize_text(c))
 
-    for gc in ds["gold_context"]:
+    for gc in ds[gold_field]:
+        # Preserve sentence boundaries from the raw field before whitespace is collapsed.
+        gold_sentences_list.append(_split_gold_sentences(gc))
         if isinstance(gc, (list, tuple)):
             gc = " ".join(str(x) for x in gc)
         gold_contexts.append(normalize_text(gc))
@@ -139,7 +150,7 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List
         questions.append(normalize_text(q))
         answers.append(normalize_text(a))
 
-    return contexts, questions, answers, gold_contexts
+    return contexts, questions, answers, gold_contexts, gold_sentences_list
 
 
 # -------------------------------------------------------------------
@@ -269,33 +280,6 @@ def score_query_against_matrix(query_vec: torch.Tensor, matrix: torch.Tensor) ->
 # METRICS
 # -------------------------------------------------------------------
 
-def compute_f1(prediction: str, ground_truth: str) -> float:
-    pred_tokens = normalize_answer(prediction).split()
-    gold_tokens = normalize_answer(ground_truth).split()
-
-    if not pred_tokens or not gold_tokens:
-        return 0.0
-
-    common = Counter(pred_tokens) & Counter(gold_tokens)
-    num_same = sum(common.values())
-    if num_same == 0:
-        return 0.0
-
-    precision = num_same / len(pred_tokens)
-    recall = num_same / len(gold_tokens)
-    return 2 * precision * recall / (precision + recall)
-
-
-def compute_em(prediction: str, ground_truth: str) -> float:
-    return float(normalize_answer(prediction) == normalize_answer(ground_truth))
-
-
-def compute_containment(prediction: str, ground_truth: str) -> float:
-    gold_norm = normalize_answer(ground_truth)
-    if not gold_norm:
-        return 0.0
-    return float(gold_norm in normalize_answer(prediction))
-
 
 def extract_answer_span(text: str, gold: str) -> str:
     if not text:
@@ -324,28 +308,55 @@ def extract_answer_span(text: str, gold: str) -> str:
     return t.strip()
 
 
-def compute_recall_at_k_origin(
+def compute_recall_index(
     scored_pids: List[Tuple[int, float]],
     gold_example_id: int,
     chunk_id_to_original: List[int],
     k: int,
 ) -> int:
+    """Index-based recall: any top-k chunk's source doc id matches query's example id."""
     for pid, _ in scored_pids[:k]:
         if chunk_id_to_original[pid] == gold_example_id:
             return 1
     return 0
 
 
-def compute_mrr_at_k_origin(
+def compute_mrr_index(
     scored_pids: List[Tuple[int, float]],
     gold_example_id: int,
     chunk_id_to_original: List[int],
     k: int,
 ) -> float:
+    """Index-based MRR: rank of first top-k chunk whose source doc id matches."""
     for i, (pid, _) in enumerate(scored_pids[:k]):
         if chunk_id_to_original[pid] == gold_example_id:
             return 1.0 / (i + 1)
     return 0.0
+
+
+def compute_recall_text(retrieved_texts: List[str], gold_sentences: List[str], k: int) -> int:
+    """Text-based recall: any gold sentence appears as substring of any top-k chunk."""
+    top_k = retrieved_texts[:k]
+    return int(any(
+        any(gold.lower() in ctx.lower() for ctx in top_k)
+        for gold in gold_sentences
+    ))
+
+
+def compute_mrr_text(retrieved_texts: List[str], gold_sentences: List[str], k: int) -> float:
+    """Text-based MRR: rank of first chunk containing any gold sentence."""
+    for i, ctx in enumerate(retrieved_texts[:k]):
+        if any(gold.lower() in ctx.lower() for gold in gold_sentences):
+            return 1.0 / (i + 1)
+    return 0.0
+
+
+def compute_f1_gold(retrieved_texts: List[str], gold_context: str, k: int) -> float:
+    """Best token-F1 between any top-k chunk and the full gold context string."""
+    best_f1 = 0.0
+    for ctx in retrieved_texts[:k]:
+        best_f1 = max(best_f1, compute_f1(ctx, gold_context))
+    return best_f1
 
 
 # -------------------------------------------------------------------
@@ -426,10 +437,39 @@ def rank_query_global(
 # GENERATION
 # -------------------------------------------------------------------
 
-HYPERNET_QUERY_PREFIX = (
-    "Answer the question in as few words as possible. "
-    "Only output the answer itself, no explanation or extra text.\n\n"
-)
+
+def _prompt_token_count(tokenizer, context_str, query, answer_style):
+    """Return the number of tokens in the chat-formatted prompt (no generation tokens)."""
+    if answer_style == "full":
+        user_content = (
+            f"Answer the question fully and completely based on the given passages. "
+            f"Your answer should cover all relevant aspects and may be multiple sentences, but keep it concise. "
+            f"If the passages do not contain enough information to answer, reply with exactly: answer not in context.\n\n"
+            f"Passages:\n{context_str}\n\n"
+            f"Question: {query}"
+        )
+    else:
+        user_content = (
+            f"Answer the question using only the given passages. "
+            f"If the passages do not contain the answer, reply with exactly: answer not in context. "
+            f"Otherwise give only the answer and do not output any other words.\n\n"
+            f"Passages:\n{context_str}\n\n"
+            f"Question: {query}"
+        )
+    tokens = tokenizer.apply_chat_template(
+        [{"role": "user", "content": user_content}],
+        add_special_tokens=False,
+        return_attention_mask=False,
+        add_generation_prompt=True,
+        return_tensors="pt",
+    )
+    return tokens.shape[1]
+
+
+def context_fits_in_window(tokenizer, context_str, query, answer_style, max_new_tokens, model_max_len):
+    """Return True if prompt + generation budget fits within the model's context window."""
+    prompt_len = _prompt_token_count(tokenizer, context_str, query, answer_style)
+    return (prompt_len + max_new_tokens) <= model_max_len
 
 
 def load_generator(pipeline: str, model_path: str | None):
@@ -443,7 +483,7 @@ def load_generator(pipeline: str, model_path: str | None):
     raise ValueError(f"Unknown pipeline: {pipeline}")
 
 
-def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
+def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, answer_style="short"):
     example = {
         "context": context,
         "prompts": [query],
@@ -458,9 +498,10 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
 
     t0 = time.time()
     if pipeline == "doc2lora":
-        outputs = run_hypernet(model, tokenizer, example, max_new_tokens=max_new_tokens)
+        outputs = run_hypernet(model, tokenizer, example, max_new_tokens=max_new_tokens, answer_style=answer_style)
     else:
-        outputs = run_baseline(model, tokenizer, example, max_new_tokens=max_new_tokens)
+        outputs = run_baseline(model, tokenizer, example, max_new_tokens=max_new_tokens,
+                               answer_style=answer_style)
 
     if cuda_device is not None:
         torch.cuda.synchronize(cuda_device)
@@ -478,7 +519,7 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens):
 # MAIN
 # -------------------------------------------------------------------
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT)
@@ -492,8 +533,12 @@ def main() -> None:
     parser.add_argument("--bridge_weight", type=float, default=0.70)
     parser.add_argument("--chunk_size", type=int, default=DEFAULT_CHUNK_SIZE)
     parser.add_argument("--chunk_overlap", type=int, default=DEFAULT_CHUNK_OVERLAP)
-    parser.add_argument("--corpus_device", type=str, default="cpu",
-                        help="Device to hold the passage matrix on (cpu or cuda). CPU is safer for large corpora.")
+    parser.add_argument(
+        "--corpus_device",
+        type=str,
+        default="cpu",
+        help="Device to hold the passage matrix on (cpu or cuda). CPU is safer for large corpora.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument(
         "--pipeline",
@@ -501,8 +546,12 @@ def main() -> None:
         default="none",
         help="Generation pipeline: doc2lora (hypernetwork), regular (LLM), or none (skip).",
     )
-    parser.add_argument("--model_path", type=str, default=None,
-                        help="Checkpoint/model directory. For doc2lora: hypernet .bin. For regular: HF model dir.")
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Checkpoint/model directory. For doc2lora: hypernet .bin. For regular: HF model dir.",
+    )
     parser.add_argument(
         "--context_mode",
         choices=["joined", "per_chunk"],
@@ -510,8 +559,26 @@ def main() -> None:
         help="joined: concat top-K into one context. per_chunk: pass each retrieved chunk as list (doc2lora only).",
     )
     parser.add_argument("--max_new_tokens", type=int, default=32)
-    parser.add_argument("--gen_output", type=str,
-                        default="./data/retrieved/neural_rag_gen_outputs.json")
+    parser.add_argument(
+        "--gen_output",
+        type=str,
+        default="./data/retrieved/neural_rag_gen_outputs.json",
+    )
+    parser.add_argument(
+        "--metrics_output",
+        type=str,
+        default=None,
+        help="Path to save a JSON of final retrieval (and generation) metrics only.",
+    )
+    parser.add_argument(
+        "--answer_style",
+        choices=["short", "full"],
+        default="short",
+        help=(
+            "short: terse answer + span extraction + EM/F1 (HotpotQA). "
+            "full: long answer + no span extraction + ROUGE-L (ASQA)."
+        ),
+    )
     args = parser.parse_args()
 
     print(f"Loading data: {args.input}")
@@ -519,7 +586,7 @@ def main() -> None:
     if args.max_examples > 0:
         ds = ds.select(range(min(args.max_examples, len(ds))))
 
-    contexts, questions, answers, gold_contexts = get_examples_from_dataset(ds)
+    contexts, questions, answers, gold_contexts, gold_sentences_list = get_examples_from_dataset(ds)
     print(f"Loaded {len(questions)} examples")
     print(f"Columns: {ds.column_names}")
     print(f"Loading model: {args.model}")
@@ -533,7 +600,10 @@ def main() -> None:
     print("\nBuilding global corpus...")
     t_chunk = time.time()
     all_chunks, chunk_id_to_original = build_global_corpus(
-        contexts, tokenizer, chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap
+        contexts,
+        tokenizer,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
     )
     chunk_build_sec = time.time() - t_chunk
     print(f"Total chunks: {len(all_chunks)} (from {len(contexts)} contexts) in {chunk_build_sec:.2f}s")
@@ -543,6 +613,7 @@ def main() -> None:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
+
     t_encode = time.time()
     passage_vecs = splade_encode(
         all_chunks,
@@ -556,12 +627,15 @@ def main() -> None:
     passage_matrix = torch.stack([v.to(dtype=torch.float32) for v in passage_vecs], dim=0)
     corpus_device = torch.device(args.corpus_device)
     passage_matrix = passage_matrix.to(corpus_device)
+
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
     corpus_encode_sec = time.time() - t_encode
     corpus_encode_peak_mb = (
         torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-        if device.type == "cuda" else 0.0
+        if device.type == "cuda"
+        else 0.0
     )
     corpus_matrix_mb = (passage_matrix.element_size() * passage_matrix.nelement()) / (1024 ** 2)
     print(
@@ -569,26 +643,42 @@ def main() -> None:
         f"(~{corpus_matrix_mb:.1f} MB); SPLADE encode took {corpus_encode_sec:.2f}s"
     )
 
-    recall_2 = 0
-    recall_5 = 0
-    recall_10 = 0
-    mrr_2 = 0.0
-    mrr_5 = 0.0
-    mrr_10 = 0.0
-    f1_total = 0.0
+    recall_text = {k: 0 for k in K_VALUES}
+    recall_index = {k: 0 for k in K_VALUES}
+    mrr_text = {k: 0.0 for k in K_VALUES}
+    mrr_index = {k: 0.0 for k in K_VALUES}
+    f1_k = {k: 0.0 for k in K_VALUES}
 
     run_generation = args.pipeline != "none"
-    gen_em_total = 0.0
-    gen_f1_total = 0.0
-    gen_contain_total = 0.0
-    gen_latencies: List[float] = []
-    gen_peak_mems: List[float] = []
+    gen_em_total = {k: 0.0 for k in K_VALUES}
+    gen_f1_total = {k: 0.0 for k in K_VALUES}
+    gen_contain_total = {k: 0.0 for k in K_VALUES}
+    gen_rouge_l_total = {k: 0.0 for k in K_VALUES}
+    gen_em_aware_total = {k: 0.0 for k in K_VALUES}
+    gen_f1_aware_total = {k: 0.0 for k in K_VALUES}
+    gen_contain_aware_total = {k: 0.0 for k in K_VALUES}
+    gen_rouge_l_aware_total = {k: 0.0 for k in K_VALUES}
+    gen_refused_total = {k: 0 for k in K_VALUES}
+    gen_gold_found_total = {k: 0 for k in K_VALUES}
+    gen_refused_correct_total = {k: 0 for k in K_VALUES}
+    gen_latencies: Dict[int, List[float]] = {k: [] for k in K_VALUES}
+    gen_peak_mems: Dict[int, List[float]] = {k: [] for k in K_VALUES}
+    gen_skipped: Dict[int, int] = {k: 0 for k in K_VALUES}
     gen_model = None
     gen_tokenizer = None
+    model_max_len = None
 
     if run_generation:
         print(f"\nLoading generator: pipeline={args.pipeline}, model_path={args.model_path}")
         gen_model, gen_tokenizer = load_generator(args.pipeline, args.model_path)
+
+        if args.pipeline == "regular":
+            try:
+                model_max_len = gen_model.config.max_position_embeddings
+            except Exception:
+                model_max_len = 8192
+
+            print(f"Model context window: {model_max_len} tokens")
 
     retrieved_records: List[Dict[str, Any]] = []
     retrieval_latencies: List[float] = []
@@ -604,6 +694,7 @@ def main() -> None:
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
             torch.cuda.synchronize(device)
+
         t_q = time.time()
         scored_pids = rank_query_global(
             question=query,
@@ -618,30 +709,31 @@ def main() -> None:
             seed_passages=args.seed_passages,
             bridge_weight=args.bridge_weight,
         )
+
         if device.type == "cuda":
             torch.cuda.synchronize(device)
+
         query_latency = time.time() - t_q
         query_peak_mem_mb = (
             torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-            if device.type == "cuda" else 0.0
+            if device.type == "cuda"
+            else 0.0
         )
         retrieval_latencies.append(query_latency)
         retrieval_peak_mems.append(query_peak_mem_mb)
 
-        recall_2 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=2)
-        recall_5 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=5)
-        recall_10 += compute_recall_at_k_origin(scored_pids, i, chunk_id_to_original, k=10)
-        mrr_2 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=2)
-        mrr_5 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=5)
-        mrr_10 += compute_mrr_at_k_origin(scored_pids, i, chunk_id_to_original, k=10)
+        metric_texts = [all_chunks[pid] for pid, _ in scored_pids[:max(K_VALUES)]]
+        gold_sentences = gold_sentences_list[i]
 
-        top_texts = [all_chunks[pid] for pid, _ in scored_pids[: args.top_k_passages]]
-        top_origins = [chunk_id_to_original[pid] for pid, _ in scored_pids[: args.top_k_passages]]
+        for k in K_VALUES:
+            recall_text[k] += compute_recall_text(metric_texts, gold_sentences, k=k)
+            recall_index[k] += compute_recall_index(scored_pids, i, chunk_id_to_original, k=k)
+            mrr_text[k] += compute_mrr_text(metric_texts, gold_sentences, k=k)
+            mrr_index[k] += compute_mrr_index(scored_pids, i, chunk_id_to_original, k=k)
+            f1_k[k] += compute_f1_gold(metric_texts, gold_context, k=k)
 
-        best_f1 = 0.0
-        for ctx in top_texts:
-            best_f1 = max(best_f1, compute_f1(ctx, gold_context))
-        f1_total += best_f1
+        top_texts = [all_chunks[pid] for pid, _ in scored_pids[:args.top_k_passages]]
+        top_origins = [chunk_id_to_original[pid] for pid, _ in scored_pids[:args.top_k_passages]]
 
         record = {
             "id": i,
@@ -650,67 +742,143 @@ def main() -> None:
             "retrieved_context": top_texts,
             "retrieved_origins": top_origins,
             "answer": normalize_answer(true_answer),
-            "scored_pids": scored_pids[: args.top_k_passages],
+            "scored_pids": scored_pids[:args.top_k_passages],
         }
 
         if run_generation:
-            if args.context_mode == "per_chunk" and args.pipeline == "doc2lora":
-                gen_context = list(top_texts)
-            else:
-                gen_context = "\n\n".join(top_texts)
+            gen_results: Dict[int, Any] = {}
 
-            gen_query = (
-                HYPERNET_QUERY_PREFIX + query
-                if args.pipeline == "doc2lora"
-                else query
-            )
+            for k in K_VALUES:
+                top_k_texts = top_texts[:k]
 
-            raw_prediction, latency, peak_mem_mb = generate_answer(
-                args.pipeline,
-                gen_model,
-                gen_tokenizer,
-                gen_context,
-                gen_query,
-                args.max_new_tokens,
-            )
-            prediction = extract_answer_span(raw_prediction, true_answer)
+                if args.pipeline == "doc2lora":
+                    gen_context = list(top_k_texts)
+                else:
+                    gen_context = "\n\n".join(top_k_texts)
 
-            em = compute_em(prediction, true_answer)
-            f1 = compute_f1(prediction, true_answer)
-            contain = compute_containment(raw_prediction, true_answer)
-            gen_em_total += em
-            gen_f1_total += f1
-            gen_contain_total += contain
-            gen_latencies.append(latency)
-            gen_peak_mems.append(peak_mem_mb)
+                    if model_max_len is not None and not context_fits_in_window(
+                        gen_tokenizer,
+                        gen_context,
+                        query,
+                        args.answer_style,
+                        args.max_new_tokens,
+                        model_max_len,
+                    ):
+                        gen_skipped[k] += 1
+                        gen_em_total[k] += 0.0
+                        gen_f1_total[k] += 0.0
+                        gen_contain_total[k] += 0.0
+                        gen_rouge_l_total[k] += 0.0
 
-            record["prediction_raw"] = raw_prediction
-            record["prediction"] = normalize_answer(prediction)
-            record["gen_em"] = em
-            record["gen_f1"] = f1
-            record["gen_contain"] = contain
-            record["gen_latency_sec"] = latency
-            record["gen_peak_mem_mb"] = peak_mem_mb
+                        if gold_in_retrieved(true_answer, top_k_texts):
+                            gen_gold_found_total[k] += 1
+
+                        gen_results[k] = {"skipped": "context_too_long"}
+                        continue
+
+                try:
+                    raw_prediction, latency, peak_mem_mb = generate_answer(
+                        args.pipeline,
+                        gen_model,
+                        gen_tokenizer,
+                        gen_context,
+                        query,
+                        args.max_new_tokens,
+                        answer_style=args.answer_style,
+                    )
+                except RuntimeError as e:
+                    if "aligned" in str(e).lower() or "cuda" in str(e).lower():
+                        print(f"[WARN] Skipping sample {i} k={k} due to error: {e}")
+                        gen_skipped[k] += 1
+                        gen_em_total[k] += 0.0
+                        gen_f1_total[k] += 0.0
+                        gen_contain_total[k] += 0.0
+                        gen_rouge_l_total[k] += 0.0
+
+                        if gold_in_retrieved(true_answer, top_k_texts):
+                            gen_gold_found_total[k] += 1
+
+                        gen_results[k] = {"skipped": "cuda_error"}
+                        continue
+
+                    raise
+
+                if args.answer_style == "full":
+                    prediction = raw_prediction
+                else:
+                    prediction = extract_answer_span(raw_prediction, true_answer)
+
+                em = compute_em(prediction, true_answer)
+                f1 = compute_f1(prediction, true_answer)
+                contain = compute_containment(raw_prediction, true_answer)
+                rouge_l = compute_rouge_l(prediction, true_answer)
+
+                pred_for_refusal_check = prediction if args.answer_style != "full" else raw_prediction
+                em_a, f1_a, rouge_l_a, contain_a, refused_correct, refused, gold_found = apply_refusal_credit(
+                    em,
+                    f1,
+                    rouge_l,
+                    contain,
+                    pred_for_refusal_check,
+                    true_answer,
+                    top_k_texts,
+                )
+
+                gen_em_total[k] += em
+                gen_f1_total[k] += f1
+                gen_contain_total[k] += contain
+                gen_rouge_l_total[k] += rouge_l
+                gen_em_aware_total[k] += em_a
+                gen_f1_aware_total[k] += f1_a
+                gen_contain_aware_total[k] += contain_a
+                gen_rouge_l_aware_total[k] += rouge_l_a
+                gen_refused_total[k] += int(refused)
+                gen_gold_found_total[k] += int(gold_found)
+                gen_refused_correct_total[k] += int(refused_correct)
+                gen_latencies[k].append(latency)
+                gen_peak_mems[k].append(peak_mem_mb)
+
+                gen_results[k] = {
+                    "prediction_raw": raw_prediction,
+                    "prediction": normalize_answer(prediction),
+                    "gen_em": em,
+                    "gen_f1": f1,
+                    "gen_contain": contain,
+                    "gen_rouge_l": rouge_l,
+                    "gen_em_aware": em_a,
+                    "gen_f1_aware": f1_a,
+                    "gen_contain_aware": contain_a,
+                    "gen_rouge_l_aware": rouge_l_a,
+                    "is_refusal": refused,
+                    "gold_in_retrieved": gold_found,
+                    "refused_correctly": refused_correct,
+                    "gen_latency_sec": latency,
+                    "gen_peak_mem_mb": peak_mem_mb,
+                }
+
+            record["generation"] = gen_results
 
         retrieved_records.append(record)
 
     num_samples = len(questions)
-    recall_2 /= num_samples
-    recall_5 /= num_samples
-    recall_10 /= num_samples
-    mrr_2 = mrr_2 / num_samples
-    mrr_5 = mrr_5 / num_samples
-    mrr_10 = mrr_10 / num_samples
-    f1_score = f1_total / num_samples
+    for k in K_VALUES:
+        recall_text[k] /= num_samples
+        recall_index[k] /= num_samples
+        mrr_text[k] /= num_samples
+        mrr_index[k] /= num_samples
+        f1_k[k] /= num_samples
 
-    print("\n===== RETRIEVAL (gold = originating context) =====")
-    print(f"Recall@2       : {recall_2:.4f}")
-    print(f"Recall@5       : {recall_5:.4f}")
-    print(f"Recall@10      : {recall_10:.4f}")
-    print(f"MRR@2         : {mrr_2:.4f}")
-    print(f"MRR@5         : {mrr_5:.4f}")
-    print(f"MRR@10        : {mrr_10:.4f}")
-    print(f"F1 vs gold ctx : {f1_score:.4f}")
+    print("\n===== RETRIEVAL (TEXT: gold substring in retrieved chunk) =====")
+    for k in K_VALUES:
+        print(f"Recall@{k}: {recall_text[k]:.4f}   MRR@{k}: {mrr_text[k]:.4f}")
+
+    print("\n===== RETRIEVAL (INDEX: retrieved chunk's source doc == query's doc) =====")
+    for k in K_VALUES:
+        print(f"Recall@{k}: {recall_index[k]:.4f}   MRR@{k}: {mrr_index[k]:.4f}")
+
+    print("\n===== RETRIEVAL F1 (vs full gold context) =====")
+    for k in K_VALUES:
+        print(f"F1@{k}: {f1_k[k]:.4f}")
 
     sorted_latencies = sorted(retrieval_latencies)
     avg_query_sec = sum(sorted_latencies) / len(sorted_latencies) if sorted_latencies else 0.0
@@ -722,52 +890,93 @@ def main() -> None:
     max_peak_mem_mb_retrieval = max(retrieval_peak_mems) if retrieval_peak_mems else 0.0
 
     print("\n===== RETRIEVAL LATENCY =====")
-    print(f"Corpus build (s)       : {chunk_build_sec:.2f}")
-    print(f"Corpus SPLADE enc (s)  : {corpus_encode_sec:.2f}")
-    print(f"Corpus matrix size MB  : {corpus_matrix_mb:.1f}")
-    print(f"Corpus enc peak mem MB : {corpus_encode_peak_mb:.1f}")
-    print(f"Avg query time (s)     : {avg_query_sec:.4f}")
-    print(f"p95 query time (s)     : {p95_query_sec:.4f}")
-    print(f"Avg peak mem MB        : {avg_peak_mem_mb_retrieval:.1f}")
-    print(f"Max peak mem MB        : {max_peak_mem_mb_retrieval:.1f}")
+    print(f"Corpus build (s): {chunk_build_sec:.2f}")
+    print(f"Corpus SPLADE enc (s): {corpus_encode_sec:.2f}")
+    print(f"Corpus matrix size MB: {corpus_matrix_mb:.1f}")
+    print(f"Corpus enc peak mem MB: {corpus_encode_peak_mb:.1f}")
+    print(f"Avg query time (s): {avg_query_sec:.4f}")
+    print(f"p95 query time (s): {p95_query_sec:.4f}")
+    print(f"Avg peak mem MB: {avg_peak_mem_mb_retrieval:.1f}")
+    print(f"Max peak mem MB: {max_peak_mem_mb_retrieval:.1f}")
 
     if run_generation:
-        gen_em = gen_em_total / num_samples
-        gen_f1 = gen_f1_total / num_samples
-        gen_contain = gen_contain_total / num_samples
-        avg_latency = sum(gen_latencies) / len(gen_latencies)
-        avg_peak_mem = sum(gen_peak_mems) / len(gen_peak_mems)
-        max_peak_mem = max(gen_peak_mems)
+        print(f"\n===== GENERATION ({args.pipeline}, answer_style={args.answer_style}) =====")
+        gen_summary: Dict[str, Any] = {}
 
-        print(f"\n===== GENERATION ({args.pipeline}) =====")
-        print(f"Answer EM      : {gen_em:.4f}  (on cleaned prediction)")
-        print(f"Answer F1      : {gen_f1:.4f}  (on cleaned prediction)")
-        print(f"Containment    : {gen_contain:.4f}  (gold in raw prediction)")
-        print(f"Avg latency (s): {avg_latency:.4f}")
-        print(f"Avg peak mem MB: {avg_peak_mem:.1f}")
-        print(f"Max peak mem MB: {max_peak_mem:.1f}")
+        for k in K_VALUES:
+            g_em = gen_em_total[k] / num_samples
+            g_f1 = gen_f1_total[k] / num_samples
+            g_contain = gen_contain_total[k] / num_samples
+            g_rouge_l = gen_rouge_l_total[k] / num_samples
+
+            g_em_a = gen_em_aware_total[k] / num_samples
+            g_f1_a = gen_f1_aware_total[k] / num_samples
+            g_contain_a = gen_contain_aware_total[k] / num_samples
+            g_rouge_l_a = gen_rouge_l_aware_total[k] / num_samples
+
+            refusal_rate = gen_refused_total[k] / num_samples
+            retrieval_fail_rate = (num_samples - gen_gold_found_total[k]) / num_samples
+            refused_correct_rate = gen_refused_correct_total[k] / num_samples
+
+            lats = gen_latencies[k]
+            mems = gen_peak_mems[k]
+            avg_lat = sum(lats) / len(lats) if lats else 0.0
+            avg_mem = sum(mems) / len(mems) if mems else 0.0
+            max_mem = max(mems) if mems else 0.0
+            skipped = gen_skipped[k]
+
+            print(f"\n  --- top-{k} context ---")
+            print(f"Answer EM: {g_em:.4f} (aware: {g_em_a:.4f})")
+            print(f"Answer F1: {g_f1:.4f} (aware: {g_f1_a:.4f})")
+            print(f"ROUGE-L: {g_rouge_l:.4f} (aware: {g_rouge_l_a:.4f})")
+            print(f"Containment: {g_contain:.4f} (aware: {g_contain_a:.4f})")
+            print(
+                f"Refusal rate: {refusal_rate:.4f} "
+                f"Retrieval-fail: {retrieval_fail_rate:.4f} "
+                f"Correct refusals: {refused_correct_rate:.4f}"
+            )
+
+            if skipped:
+                print(f"Skipped: {skipped}/{num_samples} (context too long or CUDA error)")
+
+            print(f"Avg latency (s): {avg_lat:.4f}")
+            print(f"Avg peak mem MB: {avg_mem:.1f}")
+            print(f"Max peak mem MB: {max_mem:.1f}")
+
+            gen_summary[str(k)] = {
+                "answer_em": g_em,
+                "answer_f1": g_f1,
+                "answer_rouge_l": g_rouge_l,
+                "answer_contain": g_contain,
+                "answer_em_aware": g_em_a,
+                "answer_f1_aware": g_f1_a,
+                "answer_rouge_l_aware": g_rouge_l_a,
+                "answer_contain_aware": g_contain_a,
+                "refusal_rate": refusal_rate,
+                "retrieval_fail_rate": retrieval_fail_rate,
+                "refused_correct_rate": refused_correct_rate,
+                "avg_latency_sec": avg_lat,
+                "avg_peak_mem_mb": avg_mem,
+                "max_peak_mem_mb": max_mem,
+                "num_skipped": skipped,
+                "num_samples": num_samples,
+            }
 
         Path(args.gen_output).parent.mkdir(parents=True, exist_ok=True)
         with open(args.gen_output, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "pipeline": args.pipeline,
+                    "answer_style": args.answer_style,
                     "model_path": args.model_path,
-                    "summary": {
-                        "answer_em": gen_em,
-                        "answer_f1": gen_f1,
-                        "answer_contain": gen_contain,
-                        "avg_latency_sec": avg_latency,
-                        "avg_peak_mem_mb": avg_peak_mem,
-                        "max_peak_mem_mb": max_peak_mem,
-                        "num_samples": num_samples,
-                    },
+                    "summary": gen_summary,
                     "records": retrieved_records,
                 },
                 f,
                 indent=2,
                 ensure_ascii=False,
             )
+
         print(f"Saved generation results to {args.gen_output}")
 
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
@@ -777,13 +986,11 @@ def main() -> None:
                 "model": args.model,
                 "input": args.input,
                 "summary": {
-                    "recall_at_2": recall_2,
-                    "recall_at_5": recall_5,
-                    "recall_at_10": recall_10,
-                    "mrr_at_2": mrr_2,
-                    "mrr_at_5": mrr_5,
-                    "mrr_at_10": mrr_10,
-                    "f1_vs_gold_context": f1_score,
+                    "recall_text": {str(k): recall_text[k] for k in K_VALUES},
+                    "recall_index": {str(k): recall_index[k] for k in K_VALUES},
+                    "mrr_text": {str(k): mrr_text[k] for k in K_VALUES},
+                    "mrr_index": {str(k): mrr_index[k] for k in K_VALUES},
+                    "f1_vs_gold_context": {str(k): f1_k[k] for k in K_VALUES},
                     "num_samples": num_samples,
                     "num_chunks": len(all_chunks),
                     "corpus_build_sec": chunk_build_sec,
@@ -801,7 +1008,38 @@ def main() -> None:
             indent=2,
             ensure_ascii=False,
         )
+
     print(f"Saved retrieval results to {args.output}")
+
+    if args.metrics_output:
+        metrics: Dict[str, Any] = {
+            "model": args.model,
+            "input": args.input,
+            "num_samples": num_samples,
+            "retrieval": {
+                "recall_text": {str(k): recall_text[k] for k in K_VALUES},
+                "recall_index": {str(k): recall_index[k] for k in K_VALUES},
+                "mrr_text": {str(k): mrr_text[k] for k in K_VALUES},
+                "mrr_index": {str(k): mrr_index[k] for k in K_VALUES},
+                "f1_vs_gold_context": {str(k): f1_k[k] for k in K_VALUES},
+                "avg_query_sec": avg_query_sec,
+                "p95_query_sec": p95_query_sec,
+                "corpus_build_sec": chunk_build_sec,
+                "corpus_encode_sec": corpus_encode_sec,
+            },
+        }
+
+        if run_generation:
+            metrics["generation"] = {
+                "answer_style": args.answer_style,
+                "summary": gen_summary,
+            }
+
+        Path(args.metrics_output).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.metrics_output, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2, ensure_ascii=False)
+
+        print(f"Saved metrics to {args.metrics_output}")
 
 
 if __name__ == "__main__":
