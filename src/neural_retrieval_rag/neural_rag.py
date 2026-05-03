@@ -73,9 +73,9 @@ K_VALUES = (20,)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # DATA LOADING
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def normalize_text(text: Any) -> str:
     text = html.unescape(str(text or ""))
@@ -153,9 +153,9 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List
     return contexts, questions, answers, gold_contexts, gold_sentences_list
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # RETRIEVAL HELPERS
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def chunk_text(tokenizer, text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> List[str]:
     tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
@@ -276,9 +276,9 @@ def score_query_against_matrix(query_vec: torch.Tensor, matrix: torch.Tensor) ->
     return torch.mv(matrix, q).tolist()
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # METRICS
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 def extract_answer_span(text: str, gold: str) -> str:
@@ -359,9 +359,9 @@ def compute_f1_gold(retrieved_texts: List[str], gold_context: str, k: int) -> fl
     return best_f1
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GLOBAL CORPUS BUILD + QUERY RETRIEVAL
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def build_global_corpus(
     contexts: List[str],
@@ -433,9 +433,9 @@ def rank_query_global(
     return scored
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # GENERATION
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 def _prompt_token_count(tokenizer, context_str, query, answer_style):
@@ -515,9 +515,9 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, 
     return outputs[0].strip(), latency, peak_mem_mb
 
 
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # MAIN
-# -------------------------------------------------------------------
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def main():
     parser = argparse.ArgumentParser()
