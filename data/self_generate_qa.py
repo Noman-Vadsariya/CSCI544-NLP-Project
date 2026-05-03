@@ -103,11 +103,6 @@ def get_dataset_configs(
 
         # Process train datasets
         train_ds_names = config.get("train_ds_names", [])
-        # self_gen_train_ds_names = [
-        #     (ds_name.split("/")[-1], "train")
-        #     for ds_name in train_ds_names
-        #     if ds_name.startswith("self_gen/")
-        # ]
         self_gen_train_ds_names = [
             (ds_name, "train")
             for ds_name in train_ds_names
@@ -255,11 +250,6 @@ def self_generate(
     )
 
     ctxs = [sample["context"] for sample in ds]
-    # bug from original code they replace it directly right after 
-    # questions = [
-    #     [add_closed_qa_prompt(q, closed_qa_prob) for q in sample["prompts"] if q]
-    #     for sample in ds
-    # ]
 
     questions = [q_list for q_list in ds["prompts"] if len(q_list) > 0]
 
@@ -443,13 +433,9 @@ def execute_qa_generation(
     print(f"Skipped {n_skips} responses due to missing stop strings")
     samples = [
         {
-            # "context": ctx,
-            # "prompts": q_list,
-            # "responses": self_gen_data[ctx]["responses"],
             "ctx_ids": self_gen_data[ctx]["ctx_ids"],
             "input_ids": self_gen_data[ctx]["input_ids"],
             "response_start_end": self_gen_data[ctx]["response_start_end"],
-            # "prompt_start_end": self_gen_data[ctx]["prompt_start_end"],
             "logprobs_vals": self_gen_data[ctx]["logprobs_vals"],
             "logprobs_indices": self_gen_data[ctx]["logprobs_indices"],
         }
@@ -458,7 +444,6 @@ def execute_qa_generation(
 
     if args.debug:
         for sample in samples:
-            # print(f"context={tk.decode(sample['ctx_ids'])}")
             print(f"QA={[tk.decode(ids) for ids in sample['input_ids']]}")
 
             for input_ids, (start, end) in zip(
@@ -477,10 +462,7 @@ def execute_qa_generation(
     # random.shuffle(samples)
 
     # Save results
-    # df = pd.DataFrame(samples)
-    # ds_out = Dataset.from_pandas(df)
     ds_out = Dataset.from_list(samples)
-    # fpath = f"{SELF_GEN_DATA_DIR}/{args.vllm_model}_temp_{temp}_closed_qa_prob_{closed_qa_prob}/{ds_name}/{split}/ds{shard_name}"
 
     if args.debug:
         fpath += "_debug"

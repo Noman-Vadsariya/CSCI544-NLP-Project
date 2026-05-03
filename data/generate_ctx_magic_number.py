@@ -4,9 +4,6 @@ import math
 import os
 import random
 
-# -----------------------------
-# Config knobs (edit or use CLI)
-# -----------------------------
 TOKENS_PER_BLOCK = 40  # rough heuristic tokens per noise block
 BASE_SAMPLES_PER_BIN = (
     320_000  # training samples budget scaler only (val/test fixed at 1000 each)
@@ -29,11 +26,8 @@ def save_jsonl(data: list[dict], filepath: str) -> None:
 
 essential_digits4 = lambda: f"{random.randint(0, 9_999):04d}"
 
-
 def _choose_position(total_blocks: int, depth_bin: int) -> int:
-    """Choose an insertion index for the special sentence within [0, total_blocks-1]
-    such that its relative depth falls within the depth bin [i/10, (i+1)/10).
-    """
+
     if total_blocks <= 0:
         return 0
     # Use floor for start and ceil for end to cover boundaries evenly
@@ -46,11 +40,7 @@ def _choose_position(total_blocks: int, depth_bin: int) -> int:
 
 
 def _build_example(total_blocks: int, depth_bin: int) -> dict:
-    """Build one example with a special line inserted among noise blocks.
 
-    total_blocks: total number of blocks in the final context (including the special one)
-    depth_bin: integer in [0, 9]
-    """
     total_blocks = max(1, total_blocks)
 
     # Prepare blocks
@@ -146,9 +136,6 @@ def main():
 
     random.seed(args.seed)
 
-    # ----------------------------------------------------
-    # Optional: report tokenizer-based token length stats
-    # ----------------------------------------------------
     if args.tokenizer_name:
         try:
             from transformers import AutoTokenizer  # type: ignore
@@ -232,9 +219,7 @@ def main():
                 print(json.dumps(sample[0], indent=2))
                 break
         return
-    # -----------------------------------------------
-    # Main generation per token bin
-    # -----------------------------------------------
+
     TARGET_VAL = 1000
     TARGET_TEST = 1000
     for len_bin, tok_bin in zip(len_bins, tok_bins):

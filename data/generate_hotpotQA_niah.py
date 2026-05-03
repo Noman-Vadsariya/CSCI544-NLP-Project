@@ -18,7 +18,6 @@ RNG_SEED = 42
 SEP = "\n"
 NOISE_BLOCK = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
 
-
 @dataclass
 class NIAHSample:
     sample_id: int
