@@ -70,6 +70,7 @@ DEFAULT_SEED_PASSAGES = 3
 # k values evaluated for retrieval and generation
 K_VALUES = (20,)
 
+# Keep tokenizer parallelism off to avoid noisy thread contention in HF tokenizers
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
@@ -77,12 +78,14 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # DATA LOADING
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# Normalize raw text fields into a consistent single-line format so downstream matching and scoring behave predictably
 def normalize_text(text: Any) -> str:
     text = html.unescape(str(text or ""))
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
+# Load dataset from disk, handling format differences so the rest of the pipeline can assume a uniform HuggingFace dataset object
 def load_processed_dataset(input_path: str):
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -97,6 +100,7 @@ def load_processed_dataset(input_path: str):
     return ds
 
 
+# Break the gold context into sentence-like units before normalization so we can later check whether any retrieved chunk contains a gold sentence substring
 def _split_gold_sentences(raw) -> List[str]:
     """Extract non-empty sentence strings from a raw gold_context field.
 
@@ -109,6 +113,7 @@ def _split_gold_sentences(raw) -> List[str]:
     return [normalize_text(s) for s in items if s and str(s).strip()]
 
 
+# Extract and normalize the core fields from the dataset, handling quirks like nested lists and alternate field names
 def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List[str], List[List[str]]]:
     required = {"context", "prompts", "responses"}
     if not required.issubset(ds.column_names):
@@ -128,12 +133,13 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List
     gold_contexts = []
     gold_sentences_list: List[List[str]] = []
     for c in ds["context"]:
+        # Flatten list-valued contexts into a single passage before normalization
         if isinstance(c, (list, tuple)):
             c = " ".join(str(x) for x in c)
         contexts.append(normalize_text(c))
 
     for gc in ds[gold_field]:
-        # Preserve sentence boundaries from the raw field before whitespace is collapsed.
+        # Preserve sentence boundaries from the raw field before whitespace is collapsed
         gold_sentences_list.append(_split_gold_sentences(gc))
         if isinstance(gc, (list, tuple)):
             gc = " ".join(str(x) for x in gc)
@@ -143,6 +149,7 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List
     answers = []
 
     for q, a in zip(ds["prompts"], ds["responses"]):
+        # Prompts and responses are sometimes nested lists; use the first item when that happens
         if isinstance(q, (list, tuple)) and q:
             q = q[0]
         if isinstance(a, (list, tuple)) and a:
@@ -157,6 +164,7 @@ def get_examples_from_dataset(ds) -> Tuple[List[str], List[str], List[str], List
 # RETRIEVAL HELPERS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# Split a document into overlapping token-based chunks so retrieval operates over manageable passage units instead of full documents
 def chunk_text(tokenizer, text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_CHUNK_OVERLAP) -> List[str]:
     tokens = tokenizer.encode(text, add_special_tokens=False, truncation=True, max_length=512)
     if not tokens:
@@ -172,6 +180,7 @@ def chunk_text(tokenizer, text: str, chunk_size: int = DEFAULT_CHUNK_SIZE, overl
     return chunks
 
 
+# Deduplicate text items while preserving order so bridge terms stay focused instead of repeating near-duplicates
 def ordered_unique(items: Sequence[str]) -> List[str]:
     seen = set()
     out: List[str] = []
@@ -187,6 +196,7 @@ def ordered_unique(items: Sequence[str]) -> List[str]:
     return out
 
 
+# Extract salient terms from text to build bridge queries that expand the original question using retrieved context
 def extract_bridge_terms(text: str, nlp, max_terms: int = 24) -> List[str]:
     doc = nlp(text)
     candidates: List[str] = []
@@ -213,6 +223,7 @@ def extract_bridge_terms(text: str, nlp, max_terms: int = 24) -> List[str]:
     return ordered_unique(candidates)[:max_terms]
 
 
+# Combine the original question with important terms from seed passages to form an expanded query for second-stage retrieval
 def build_bridge_query(question: str, seed_texts: List[str], nlp, max_terms: int = 24) -> str:
     bridge_source = " ".join(seed_texts).strip()
     bridge_terms = extract_bridge_terms(bridge_source, nlp, max_terms=max_terms)
@@ -220,6 +231,7 @@ def build_bridge_query(question: str, seed_texts: List[str], nlp, max_terms: int
     return " ".join(ordered_unique(parts))
 
 
+# Rescale scores to [0,1] so different scoring signals can be combined fairly
 def normalize_scores(scores: List[float]) -> List[float]:
     if not scores:
         return []
@@ -231,6 +243,7 @@ def normalize_scores(scores: List[float]) -> List[float]:
 
 
 @torch.no_grad()
+# Encode text into sparse SPLADE representations using MLM logits and max pooling over tokens
 def splade_encode(
     texts: List[str],
     tokenizer: AutoTokenizer,
@@ -257,6 +270,7 @@ def splade_encode(
             return_tensors="pt",
         ).to(device)
 
+        # Encode the batch once, then use max pooling over tokens to get one sparse passage vector per text
         out = model(**enc)
         logits = out.logits
         activations = torch.log1p(torch.relu(logits))
@@ -271,6 +285,7 @@ def splade_encode(
     return outputs
 
 
+# Compute similarity scores between a query vector and all passage vectors using a fast matrix-vector product
 def score_query_against_matrix(query_vec: torch.Tensor, matrix: torch.Tensor) -> List[float]:
     q = query_vec.to(dtype=matrix.dtype, device=matrix.device)
     return torch.mv(matrix, q).tolist()
@@ -281,6 +296,7 @@ def score_query_against_matrix(query_vec: torch.Tensor, matrix: torch.Tensor) ->
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
+# Heuristically extract a short answer span from model output for EM and F1 scoring
 def extract_answer_span(text: str, gold: str) -> str:
     if not text:
         return ""
@@ -308,6 +324,7 @@ def extract_answer_span(text: str, gold: str) -> str:
     return t.strip()
 
 
+# Check whether any of the top-k retrieved chunks came from the correct document
 def compute_recall_index(
     scored_pids: List[Tuple[int, float]],
     gold_example_id: int,
@@ -321,6 +338,7 @@ def compute_recall_index(
     return 0
 
 
+# Compute reciprocal rank of the first correctly sourced chunk
 def compute_mrr_index(
     scored_pids: List[Tuple[int, float]],
     gold_example_id: int,
@@ -334,6 +352,7 @@ def compute_mrr_index(
     return 0.0
 
 
+# Check whether any retrieved chunk contains a gold sentence substring
 def compute_recall_text(retrieved_texts: List[str], gold_sentences: List[str], k: int) -> int:
     """Text-based recall: any gold sentence appears as substring of any top-k chunk."""
     top_k = retrieved_texts[:k]
@@ -343,6 +362,7 @@ def compute_recall_text(retrieved_texts: List[str], gold_sentences: List[str], k
     ))
 
 
+# Compute reciprocal rank of the first chunk that contains a gold sentence
 def compute_mrr_text(retrieved_texts: List[str], gold_sentences: List[str], k: int) -> float:
     """Text-based MRR: rank of first chunk containing any gold sentence."""
     for i, ctx in enumerate(retrieved_texts[:k]):
@@ -351,6 +371,7 @@ def compute_mrr_text(retrieved_texts: List[str], gold_sentences: List[str], k: i
     return 0.0
 
 
+# Measure how well retrieved chunks match the full gold context using token-level F1
 def compute_f1_gold(retrieved_texts: List[str], gold_context: str, k: int) -> float:
     """Best token-F1 between any top-k chunk and the full gold context string."""
     best_f1 = 0.0
@@ -363,6 +384,7 @@ def compute_f1_gold(retrieved_texts: List[str], gold_context: str, k: int) -> fl
 # GLOBAL CORPUS BUILD + QUERY RETRIEVAL
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# Build a single global corpus of chunks from all contexts and track which original example each chunk came from
 def build_global_corpus(
     contexts: List[str],
     tokenizer: AutoTokenizer,
@@ -380,6 +402,7 @@ def build_global_corpus(
     return all_chunks, chunk_id_to_original
 
 
+# Rank all corpus chunks for a query using base SPLADE retrieval plus bridge-query reranking
 def rank_query_global(
     question: str,
     all_chunks: List[str],
@@ -399,6 +422,7 @@ def rank_query_global(
     base_raw = score_query_against_matrix(q_vec, passage_matrix)
     base_scores = normalize_scores(base_raw)
 
+    # Use the top seed passages to build the bridge queries
     seed_ids = sorted(range(len(base_scores)), key=lambda i: base_scores[i], reverse=True)[: max(1, seed_passages)]
     bridge_queries: List[str] = []
     for pid in seed_ids:
@@ -425,6 +449,7 @@ def rank_query_global(
             raw = score_query_against_matrix(bv, passage_matrix)
             norm = normalize_scores(raw)
             for i, sc in enumerate(norm):
+                # Keep the best score seen for a passage across all bridge passes
                 if sc > bridge_scores[i]:
                     bridge_scores[i] = sc
 
@@ -438,6 +463,7 @@ def rank_query_global(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
+# Estimate token length of the formatted prompt so we can check context-window fit before generation
 def _prompt_token_count(tokenizer, context_str, query, answer_style):
     """Return the number of tokens in the chat-formatted prompt (no generation tokens)."""
     if answer_style == "full":
@@ -456,6 +482,7 @@ def _prompt_token_count(tokenizer, context_str, query, answer_style):
             f"Passages:\n{context_str}\n\n"
             f"Question: {query}"
         )
+    # Measure the prompt after chat templating, since that is what actually hits the model
     tokens = tokenizer.apply_chat_template(
         [{"role": "user", "content": user_content}],
         add_special_tokens=False,
@@ -466,12 +493,14 @@ def _prompt_token_count(tokenizer, context_str, query, answer_style):
     return tokens.shape[1]
 
 
+# Check whether the prompt plus generation budget stays within model limits
 def context_fits_in_window(tokenizer, context_str, query, answer_style, max_new_tokens, model_max_len):
     """Return True if prompt + generation budget fits within the model's context window."""
     prompt_len = _prompt_token_count(tokenizer, context_str, query, answer_style)
     return (prompt_len + max_new_tokens) <= model_max_len
 
 
+# Load the appropriate generation pipeline depending on the chosen model path
 def load_generator(pipeline: str, model_path: str | None):
     if pipeline == "doc2lora":
         return load_hypernet(model_path) if model_path else load_hypernet()
@@ -483,6 +512,7 @@ def load_generator(pipeline: str, model_path: str | None):
     raise ValueError(f"Unknown pipeline: {pipeline}")
 
 
+# Run the generation model on retrieved context and return the answer with latency and peak GPU memory
 def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, answer_style="short"):
     example = {
         "context": context,
@@ -491,6 +521,7 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, 
     }
     cuda_device = torch.cuda.current_device() if torch.cuda.is_available() else None
 
+    # Clear CUDA state so latency and peak-memory numbers reflect this example only
     if cuda_device is not None:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(cuda_device)
@@ -519,6 +550,13 @@ def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, 
 # MAIN
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
+# End-to-end pipeline:
+# - load data
+# - build and encode global corpus
+# - retrieve chunks for each query
+# - compute retrieval metrics
+# - optionally run generation and evaluate answers
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=str, default=DEFAULT_INPUT)
@@ -592,11 +630,13 @@ def main():
     print(f"Loading model: {args.model}")
     print(f"Loading spaCy model: {args.spacy_model}")
 
+    # Put the retrieval model on the requested device, but keep the corpus matrix on the cheaper storage device
     device = torch.device(args.device)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForMaskedLM.from_pretrained(args.model).to(device)
     nlp = spacy.load(args.spacy_model)
 
+    # Build the shared chunk corpus once instead of per query for efficiency
     print("\nBuilding global corpus...")
     t_chunk = time.time()
     all_chunks, chunk_id_to_original = build_global_corpus(
@@ -608,6 +648,7 @@ def main():
     chunk_build_sec = time.time() - t_chunk
     print(f"Total chunks: {len(all_chunks)} (from {len(contexts)} contexts) in {chunk_build_sec:.2f}s")
 
+    # Encode all chunks into SPLADE vectors once; retrieval reuses these for every query
     print("\nEncoding corpus with SPLADE...")
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -624,6 +665,7 @@ def main():
         batch_size=args.batch_size,
         show_progress=True,
     )
+    # Keep the passage matrix in a simple dense tensor so scoring stays fast and easy to batch
     passage_matrix = torch.stack([v.to(dtype=torch.float32) for v in passage_vecs], dim=0)
     corpus_device = torch.device(args.corpus_device)
     passage_matrix = passage_matrix.to(corpus_device)
@@ -649,6 +691,7 @@ def main():
     mrr_index = {k: 0.0 for k in K_VALUES}
     f1_k = {k: 0.0 for k in K_VALUES}
 
+    # Only run generation when the user asked for it
     run_generation = args.pipeline != "none"
     gen_em_total = {k: 0.0 for k in K_VALUES}
     gen_f1_total = {k: 0.0 for k in K_VALUES}
@@ -668,6 +711,7 @@ def main():
     gen_tokenizer = None
     model_max_len = None
 
+    # Set up the generator model and tokenizer once before the evaluation loop starts
     if run_generation:
         print(f"\nLoading generator: pipeline={args.pipeline}, model_path={args.model_path}")
         gen_model, gen_tokenizer = load_generator(args.pipeline, args.model_path)
@@ -684,6 +728,7 @@ def main():
     retrieval_latencies: List[float] = []
     retrieval_peak_mems: List[float] = []
 
+    # Loop over each example: retrieve top chunks, compute retrieval metrics, and optionally run generation
     print("\nRunning evaluation...")
     for i in tqdm(range(len(questions)), desc="Eval Progress"):
         query = questions[i]
@@ -696,6 +741,7 @@ def main():
             torch.cuda.synchronize(device)
 
         t_q = time.time()
+        # Rank all chunks for this question using the base SPLADE score plus bridge-query reranking
         scored_pids = rank_query_global(
             question=query,
             all_chunks=all_chunks,
@@ -722,6 +768,7 @@ def main():
         retrieval_latencies.append(query_latency)
         retrieval_peak_mems.append(query_peak_mem_mb)
 
+        # Only the top retrieved texts are used for the retrieval metrics below
         metric_texts = [all_chunks[pid] for pid, _ in scored_pids[:max(K_VALUES)]]
         gold_sentences = gold_sentences_list[i]
 
@@ -735,6 +782,7 @@ def main():
         top_texts = [all_chunks[pid] for pid, _ in scored_pids[:args.top_k_passages]]
         top_origins = [chunk_id_to_original[pid] for pid, _ in scored_pids[:args.top_k_passages]]
 
+        # Save both the retrieved text and the original example index for later inspection
         record = {
             "id": i,
             "prompt": query,
@@ -748,6 +796,7 @@ def main():
         if run_generation:
             gen_results: Dict[int, Any] = {}
 
+            # For each k, build context from retrieved chunks and run generation plus scoring
             for k in K_VALUES:
                 top_k_texts = top_texts[:k]
 
@@ -756,6 +805,7 @@ def main():
                 else:
                     gen_context = "\n\n".join(top_k_texts)
 
+                    # Do not waste time generating if the prompt would exceed the model's context window
                     if model_max_len is not None and not context_fits_in_window(
                         gen_tokenizer,
                         gen_context,
@@ -777,6 +827,7 @@ def main():
                         continue
 
                 try:
+                    # Generate the answer and record latency and peak memory for this one example
                     raw_prediction, latency, peak_mem_mb = generate_answer(
                         args.pipeline,
                         gen_model,
@@ -787,6 +838,7 @@ def main():
                         answer_style=args.answer_style,
                     )
                 except RuntimeError as e:
+                    # These runtime errors are usually shape or CUDA issues, so skip the sample and keep going
                     if "aligned" in str(e).lower() or "cuda" in str(e).lower():
                         print(f"[WARN] Skipping sample {i} k={k} due to error: {e}")
                         gen_skipped[k] += 1
@@ -803,6 +855,7 @@ def main():
 
                     raise
 
+                # Short answers get span extraction; full answers stay untouched for ROUGE-style scoring
                 if args.answer_style == "full":
                     prediction = raw_prediction
                 else:
@@ -814,6 +867,7 @@ def main():
                 rouge_l = compute_rouge_l(prediction, true_answer)
 
                 pred_for_refusal_check = prediction if args.answer_style != "full" else raw_prediction
+                # Apply refusal-aware scoring so explicit refusals are not treated the same as wrong answers
                 em_a, f1_a, rouge_l_a, contain_a, refused_correct, refused, gold_found = apply_refusal_credit(
                     em,
                     f1,
@@ -858,9 +912,11 @@ def main():
 
             record["generation"] = gen_results
 
+        # Persist the per-example retrieval trace so the results are easy to audit later
         retrieved_records.append(record)
 
     num_samples = len(questions)
+    # Average each metric over the full dataset once the loop is done
     for k in K_VALUES:
         recall_text[k] /= num_samples
         recall_index[k] /= num_samples
@@ -903,6 +959,7 @@ def main():
         print(f"\n===== GENERATION ({args.pipeline}, answer_style={args.answer_style}) =====")
         gen_summary: Dict[str, Any] = {}
 
+        # Summarize generation metrics separately for each top-k setting
         for k in K_VALUES:
             g_em = gen_em_total[k] / num_samples
             g_f1 = gen_f1_total[k] / num_samples
@@ -962,6 +1019,7 @@ def main():
                 "num_samples": num_samples,
             }
 
+        # Write the generation run output before the retrieval summary so both artifacts are available
         Path(args.gen_output).parent.mkdir(parents=True, exist_ok=True)
         with open(args.gen_output, "w", encoding="utf-8") as f:
             json.dump(
@@ -979,6 +1037,7 @@ def main():
 
         print(f"Saved generation results to {args.gen_output}")
 
+    # Save the retrieval-only results in a separate file for easier downstream use
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(
@@ -1011,6 +1070,7 @@ def main():
 
     print(f"Saved retrieval results to {args.output}")
 
+    # Keep the metrics-only JSON small so it is easy to compare runs programmatically
     if args.metrics_output:
         metrics: Dict[str, Any] = {
             "model": args.model,
@@ -1044,3 +1104,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
