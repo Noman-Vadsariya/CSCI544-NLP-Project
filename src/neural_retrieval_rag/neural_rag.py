@@ -68,7 +68,7 @@ DEFAULT_TOP_K = 20
 DEFAULT_SEED_PASSAGES = 3
 
 # k values evaluated for retrieval and generation
-K_VALUES = (20,)
+K_VALUES = (10,)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

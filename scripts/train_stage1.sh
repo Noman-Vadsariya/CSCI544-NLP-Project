@@ -1,3 +1,8 @@
+#!/usr/bin/env bash
+# Stage-1 hypernetwork fine-tune from a pre-trained doc2lora checkpoint
+# on the combined gold dataset.
+set -euo pipefail
+
 sbatch slurm/run_gpu2.sbatch src/hypernetwork/train_stage1.py \
   --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \
   --dataset combined_gold_dataset \

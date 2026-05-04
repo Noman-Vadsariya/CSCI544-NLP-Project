@@ -1,0 +1,408 @@
+{
+  "data": [
+    {
+      "needle": "The secret passphrase is secret_passphrase.",
+      "question": "What is the secret passphrase? Reply with only the passphrase."
+    },
+    {
+      "needle": "The hidden keyword is hidden_keyword.",
+      "question": "What is the hidden keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The private codeword is private_codeword.",
+      "question": "What is the private codeword? Reply with only the codeword."
+    },
+    {
+      "needle": "The access phrase is access_phrase.",
+      "question": "What is the access phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The confidential token is confidential_token.",
+      "question": "What is the confidential token? Reply with only the token."
+    },
+    {
+      "needle": "The unlock code is unlock_code.",
+      "question": "What is the unlock code? Reply with only the code."
+    },
+    {
+      "needle": "The special identifier is special_identifier.",
+      "question": "What is the special identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The reserved phrase is reserved_phrase.",
+      "question": "What is the reserved phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The internal label is internal_label.",
+      "question": "What is the internal label? Reply with only the label."
+    },
+    {
+      "needle": "The protected value is protected_value.",
+      "question": "What is the protected value? Reply with only the value."
+    },
+    {
+      "needle": "The stored reference is stored_reference.",
+      "question": "What is the stored reference? Reply with only the reference."
+    },
+    {
+      "needle": "The secure marker is secure_marker.",
+      "question": "What is the secure marker? Reply with only the marker."
+    },
+    {
+      "needle": "The hidden tag is hidden_tag.",
+      "question": "What is the hidden tag? Reply with only the tag."
+    },
+    {
+      "needle": "The unique signal is unique_signal.",
+      "question": "What is the unique signal? Reply with only the signal."
+    },
+    {
+      "needle": "The embedded clue is embedded_clue.",
+      "question": "What is the embedded clue? Reply with only the clue."
+    },
+    {
+      "needle": "The internal key is internal_key.",
+      "question": "What is the internal key? Reply with only the key."
+    },
+    {
+      "needle": "The designated phrase is designated_phrase.",
+      "question": "What is the designated phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The secret label is secret_label.",
+      "question": "What is the secret label? Reply with only the label."
+    },
+    {
+      "needle": "The private marker is private_marker.",
+      "question": "What is the private marker? Reply with only the marker."
+    },
+    {
+      "needle": "The locked term is locked_term.",
+      "question": "What is the locked term? Reply with only the term."
+    },
+    {
+      "needle": "The concealed phrase is concealed_phrase.",
+      "question": "What is the concealed phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The trusted keyword is trusted_keyword.",
+      "question": "What is the trusted keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The assigned token is assigned_token.",
+      "question": "What is the assigned token? Reply with only the token."
+    },
+    {
+      "needle": "The hidden reference is hidden_reference.",
+      "question": "What is the hidden reference? Reply with only the reference."
+    },
+    {
+      "needle": "The sealed code is sealed_code.",
+      "question": "What is the sealed code? Reply with only the code."
+    },
+    {
+      "needle": "The protected phrase is protected_phrase.",
+      "question": "What is the protected phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The special password is special_password.",
+      "question": "What is the special password? Reply with only the password."
+    },
+    {
+      "needle": "The internal phrase is internal_phrase.",
+      "question": "What is the internal phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The unique code is unique_code.",
+      "question": "What is the unique code? Reply with only the code."
+    },
+    {
+      "needle": "The secure phrase is secure_phrase.",
+      "question": "What is the secure phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The embedded token is embedded_token.",
+      "question": "What is the embedded token? Reply with only the token."
+    },
+    {
+      "needle": "The private reference is private_reference.",
+      "question": "What is the private reference? Reply with only the reference."
+    },
+    {
+      "needle": "The hidden command is hidden_command.",
+      "question": "What is the hidden command? Reply with only the command."
+    },
+    {
+      "needle": "The locked identifier is locked_identifier.",
+      "question": "What is the locked identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The confidential phrase is confidential_phrase.",
+      "question": "What is the confidential phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The stored keyword is stored_keyword.",
+      "question": "What is the stored keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The designated token is designated_token.",
+      "question": "What is the designated token? Reply with only the token."
+    },
+    {
+      "needle": "The reserved keyword is reserved_keyword.",
+      "question": "What is the reserved keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The concealed value is concealed_value.",
+      "question": "What is the concealed value? Reply with only the value."
+    },
+    {
+      "needle": "The trusted phrase is trusted_phrase.",
+      "question": "What is the trusted phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The secret input is secret_input.",
+      "question": "What is the secret input? Reply with only the input."
+    },
+    {
+      "needle": "The internal code is internal_code.",
+      "question": "What is the internal code? Reply with only the code."
+    },
+    {
+      "needle": "The hidden entry is hidden_entry.",
+      "question": "What is the hidden entry? Reply with only the entry."
+    },
+    {
+      "needle": "The secure reference is secure_reference.",
+      "question": "What is the secure reference? Reply with only the reference."
+    },
+    {
+      "needle": "The private signal is private_signal.",
+      "question": "What is the private signal? Reply with only the signal."
+    },
+    {
+      "needle": "The locked phrase is locked_phrase.",
+      "question": "What is the locked phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The special key is special_key.",
+      "question": "What is the special key? Reply with only the key."
+    },
+    {
+      "needle": "The assigned phrase is assigned_phrase.",
+      "question": "What is the assigned phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The stored token is stored_token.",
+      "question": "What is the stored token? Reply with only the token."
+    },
+    {
+      "needle": "The confidential reference is confidential_reference.",
+      "question": "What is the confidential reference? Reply with only the reference."
+    },
+    {
+      "needle": "The hidden password is hidden_password.",
+      "question": "What is the hidden password? Reply with only the password."
+    },
+    {
+      "needle": "The embedded keyword is embedded_keyword.",
+      "question": "What is the embedded keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The secret value is secret_value.",
+      "question": "What is the secret value? Reply with only the value."
+    },
+    {
+      "needle": "The protected identifier is protected_identifier.",
+      "question": "What is the protected identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The unique phrase is unique_phrase.",
+      "question": "What is the unique phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The internal tag is internal_tag.",
+      "question": "What is the internal tag? Reply with only the tag."
+    },
+    {
+      "needle": "The private clue is private_clue.",
+      "question": "What is the private clue? Reply with only the clue."
+    },
+    {
+      "needle": "The reserved token is reserved_token.",
+      "question": "What is the reserved token? Reply with only the token."
+    },
+    {
+      "needle": "The concealed keyword is concealed_keyword.",
+      "question": "What is the concealed keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The trusted code is trusted_code.",
+      "question": "What is the trusted code? Reply with only the code."
+    },
+    {
+      "needle": "The special label is special_label.",
+      "question": "What is the special label? Reply with only the label."
+    },
+    {
+      "needle": "The secure input is secure_input.",
+      "question": "What is the secure input? Reply with only the input."
+    },
+    {
+      "needle": "The hidden token is hidden_token.",
+      "question": "What is the hidden token? Reply with only the token."
+    },
+    {
+      "needle": "The designated value is designated_value.",
+      "question": "What is the designated value? Reply with only the value."
+    },
+    {
+      "needle": "The private password is private_password.",
+      "question": "What is the private password? Reply with only the password."
+    },
+    {
+      "needle": "The locked keyword is locked_keyword.",
+      "question": "What is the locked keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The embedded reference is embedded_reference.",
+      "question": "What is the embedded reference? Reply with only the reference."
+    },
+    {
+      "needle": "The secret tag is secret_tag.",
+      "question": "What is the secret tag? Reply with only the tag."
+    },
+    {
+      "needle": "The internal marker is internal_marker.",
+      "question": "What is the internal marker? Reply with only the marker."
+    },
+    {
+      "needle": "The concealed token is concealed_token.",
+      "question": "What is the concealed token? Reply with only the token."
+    },
+    {
+      "needle": "The protected keyword is protected_keyword.",
+      "question": "What is the protected keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The unique identifier is unique_identifier.",
+      "question": "What is the unique identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The stored phrase is stored_phrase.",
+      "question": "What is the stored phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The confidential marker is confidential_marker.",
+      "question": "What is the confidential marker? Reply with only the marker."
+    },
+    {
+      "needle": "The hidden clue is hidden_clue.",
+      "question": "What is the hidden clue? Reply with only the clue."
+    },
+    {
+      "needle": "The special reference is special_reference.",
+      "question": "What is the special reference? Reply with only the reference."
+    },
+    {
+      "needle": "The secure keyword is secure_keyword.",
+      "question": "What is the secure keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The private entry is private_entry.",
+      "question": "What is the private entry? Reply with only the entry."
+    },
+    {
+      "needle": "The reserved identifier is reserved_identifier.",
+      "question": "What is the reserved identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The embedded value is embedded_value.",
+      "question": "What is the embedded value? Reply with only the value."
+    },
+    {
+      "needle": "The trusted token is trusted_token.",
+      "question": "What is the trusted token? Reply with only the token."
+    },
+    {
+      "needle": "The locked reference is locked_reference.",
+      "question": "What is the locked reference? Reply with only the reference."
+    },
+    {
+      "needle": "The secret command is secret_command.",
+      "question": "What is the secret command? Reply with only the command."
+    },
+    {
+      "needle": "The designated keyword is designated_keyword.",
+      "question": "What is the designated keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The concealed label is concealed_label.",
+      "question": "What is the concealed label? Reply with only the label."
+    },
+    {
+      "needle": "The internal password is internal_password.",
+      "question": "What is the internal password? Reply with only the password."
+    },
+    {
+      "needle": "The protected token is protected_token.",
+      "question": "What is the protected token? Reply with only the token."
+    },
+    {
+      "needle": "The hidden signal is hidden_signal.",
+      "question": "What is the hidden signal? Reply with only the signal."
+    },
+    {
+      "needle": "The special marker is special_marker.",
+      "question": "What is the special marker? Reply with only the marker."
+    },
+    {
+      "needle": "The secure codeword is secure_codeword.",
+      "question": "What is the secure codeword? Reply with only the codeword."
+    },
+    {
+      "needle": "The private identifier is private_identifier.",
+      "question": "What is the private identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The stored clue is stored_clue.",
+      "question": "What is the stored clue? Reply with only the clue."
+    },
+    {
+      "needle": "The confidential keyword is confidential_keyword.",
+      "question": "What is the confidential keyword? Reply with only the keyword."
+    },
+    {
+      "needle": "The locked token is locked_token.",
+      "question": "What is the locked token? Reply with only the token."
+    },
+    {
+      "needle": "The embedded phrase is embedded_phrase.",
+      "question": "What is the embedded phrase? Reply with only the phrase."
+    },
+    {
+      "needle": "The reserved value is reserved_value.",
+      "question": "What is the reserved value? Reply with only the value."
+    },
+    {
+      "needle": "The unique marker is unique_marker.",
+      "question": "What is the unique marker? Reply with only the marker."
+    },
+    {
+      "needle": "The trusted identifier is trusted_identifier.",
+      "question": "What is the trusted identifier? Reply with only the identifier."
+    },
+    {
+      "needle": "The secret reference is secret_reference.",
+      "question": "What is the secret reference? Reply with only the reference."
+    },
+    {
+      "needle": "The concealed command is concealed_command.",
+      "question": "What is the concealed command? Reply with only the command."
+    },
+    {
+      "needle": "The secure label is secure_label.",
+      "question": "What is the secure label? Reply with only the label."
+    }
+  ]
+}

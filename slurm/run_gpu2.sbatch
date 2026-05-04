@@ -18,4 +18,8 @@ module load cuda/12.4.0
 
 cd $SLURM_SUBMIT_DIR
 
-PYTHONPATH=. uv run python "$@"
+# some cuda errors
+export XFORMERS_DISABLED=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+PYTHONPATH=src/hypernetwork:. uv run python "$@"
