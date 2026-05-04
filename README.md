@@ -8,6 +8,7 @@ needle-in-a-haystack benchmark. Eval scripts in [scripts/](scripts/).
 ## Notes
 
 This project used **4 RTX A6000 GPUs** for hypernetwork training and evaluation.
+The **p100s** from CARC were also used for development and testing of the retrieval pipeline.
 
 Most files in the `hypernetwork/` directory were repurposed from the [Doc2LoRA repository](https://github.com/SakanaAI/doc-to-lora). The primary files developed or modified for this project are:
 
