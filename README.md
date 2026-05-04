@@ -1,8 +1,23 @@
 # CSCI544-NLP-Project
 
 Doc2LoRA hypernetwork + RAG pipelines for HotpotQA, ASQA, and a synthetic
-needle-in-a-haystack benchmark. Eval scripts live in [scripts/](scripts/);
-see [scripts/README.md](scripts/README.md) for a per-script index.
+needle-in-a-haystack benchmark. Eval scripts in [scripts/](scripts/).
+ 
+ ---
+
+## Notes
+
+This project used **4 RTX A6000 GPUs** for hypernetwork training and evaluation.
+
+Most files in the `hypernetwork/` directory were repurposed from the [Doc2LoRA repository](https://github.com/SakanaAI/doc-to-lora). The primary files developed or modified for this project are:
+
+- `train_stage1.py`
+- `train_stage2.py`
+- `inference.py`
+- `measure_vram_usage.py`
+
+
+Additionally, the `build_asqa` and `build_hotpotQA` scripts were adapted from the original Doc2LoRA data-building scripts to maintain compatibility with the Doc2LoRA pipeline.
 
 ---
 

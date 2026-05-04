@@ -21,3 +21,18 @@ src/evaluation/hotpot_pred.json
 data/retrieved/
 google/
 test.py
+src/evaluation/eval_niah.py
+src/evaluation/evaluate_baseline.py
+src/evaluation/evaluate_hotpot.py
+
+# Scripts kept locally but not part of the documented submission pipeline.
+scripts/compile_results.py
+scripts/rescore_gen_from_retrieved.py
+scripts/rescore_niah_needles.py
+scripts/rewrite_hypernet_base_path.py
+scripts/eval_colbert_rag_niah_needles.sh
+scripts/eval_gen_from_retrieved.sh
+scripts/eval_hotpotqa_colbert_d2l_gemma_k20.sh
+scripts/eval_hotpotqa_colbert_regular_gemma_k20.sh
+scripts/eval_hotpotqa_gemma_k20_gen.sh
+scripts/eval_hotpotqa_neural_regular_gemma_k20.sh
