@@ -13,7 +13,7 @@ export XFORMERS_DISABLED=1
 
 mkdir -p "$OUT"
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/evaluation/generate_gold_asqa.py \
   --input "$DATA" \
   --mode hypernet \
@@ -23,7 +23,7 @@ sbatch slurm/run_gpu.sbatch src/evaluation/generate_gold_asqa.py \
   --jsonl   "$OUT/asqa_gold_hypernet_gemma_outputs.jsonl" \
   --summary "$OUT/asqa_gold_hypernet_gemma_summary.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/evaluation/generate_gold_asqa.py \
   --input "$DATA" \
   --mode standard \

@@ -19,7 +19,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 DATA="$HOTPOT_DATA"
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline doc2lora \
@@ -28,7 +28,7 @@ sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --gen_output     "$OUT/hotpotQA_compact_neural_d2l_gemma_gen.json" \
   --metrics_output "$OUT/hotpotQA_compact_neural_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline regular \
@@ -38,12 +38,12 @@ sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --metrics_output "$OUT/hotpotQA_compact_neural_regular_gemma_metrics.json"
 
 # ============================================================
-# ASQA gold subset (has gold_context column)
+# ASQA gold subset
 # ============================================================
 
 DATA="$ASQA_DATA"
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline doc2lora \
@@ -54,7 +54,7 @@ sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --gen_output     "$OUT/asqa_gold_neural_d2l_gemma_gen.json" \
   --metrics_output "$OUT/asqa_gold_neural_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline regular \

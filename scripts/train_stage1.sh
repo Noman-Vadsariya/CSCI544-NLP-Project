@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Stage-1 hypernetwork fine-tune from a pre-trained doc2lora checkpoint
-# on the combined gold dataset.
+# Stage-1 hypernetwork fine-tune from a pre-trained doc2lora checkpoint on the combined gold dataset.
 set -euo pipefail
 
 sbatch slurm/run_gpu2.sbatch src/hypernetwork/train_stage1.py \

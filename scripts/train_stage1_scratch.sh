@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Stage-1 hypernetwork training from scratch on hotpotQA_gold_compact
-# (no pre-trained doc2lora checkpoint).
 set -euo pipefail
 
 sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage1.py \

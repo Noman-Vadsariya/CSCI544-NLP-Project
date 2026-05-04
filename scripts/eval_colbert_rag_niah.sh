@@ -12,7 +12,7 @@ OUT="$REPO_ROOT/data/retrieved"
 
 export XFORMERS_DISABLED=1
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --input "$DATA" \
   --pipeline doc2lora \
@@ -23,7 +23,7 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --gen_output       "$OUT/hotpotQA_niah_needles_colbert_d2l_gemma_gen.json" \
   --metrics_output   "$OUT/hotpotQA_niah_needles_colbert_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --input "$DATA" \
   --pipeline regular \

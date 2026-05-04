@@ -14,7 +14,7 @@ export TRANSFORMERS_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
 SBATCH_EXPORT="ALL,XFORMERS_DISABLED=1,HF_HUB_OFFLINE=1,TRANSFORMERS_OFFLINE=1,HF_HUB_DISABLE_TELEMETRY=1"
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch --export="$SBATCH_EXPORT" slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline doc2lora \
@@ -23,7 +23,7 @@ sbatch --export="$SBATCH_EXPORT" slurm/run_gpu.sbatch src/neural_retrieval_rag/n
   --gen_output     "$OUT/hotpotQA_niah_needles_neural_d2l_gemma_gen.json" \
   --metrics_output "$OUT/hotpotQA_niah_needles_neural_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch --export="$SBATCH_EXPORT" slurm/run_gpu.sbatch src/neural_retrieval_rag/neural_rag.py \
   --input "$DATA" \
   --pipeline regular \

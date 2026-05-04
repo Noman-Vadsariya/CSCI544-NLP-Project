@@ -21,7 +21,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 DATA="$HOTPOT_DATA"
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --input "$DATA" \
   --pipeline doc2lora \
@@ -33,7 +33,7 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --gen_output       "$OUT/hotpotQA_compact_colbert_d2l_gemma_gen.json" \
   --metrics_output   "$OUT/hotpotQA_compact_colbert_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --input "$DATA" \
   --pipeline regular \
@@ -44,9 +44,8 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --metrics_output   "$OUT/hotpotQA_compact_colbert_regular_gemma_metrics.json"
 
 # ============================================================
-# ASQA gold subset (has gold_context column).
-# Uses a separate Pinecone namespace "asqa_gold" to avoid
-# collision with the hotpotQA index data.
+# ASQA gold
+# Uses a separate Pinecone namespace "asqa_gold" to avoid rewriting with the hotpotQA data on pinecone.
 # ============================================================
 
 DATA="$ASQA_DATA"
@@ -65,7 +64,7 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --gen_output       "$OUT/asqa_gold_colbert_d2l_gemma_gen.json" \
   --metrics_output   "$OUT/asqa_gold_colbert_d2l_gemma_metrics.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/standard_rag/rag_colbert_reranker.py \
   --input "$DATA" \
   --pipeline regular \

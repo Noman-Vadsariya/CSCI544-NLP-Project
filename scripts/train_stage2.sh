@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Stage-2 hypernetwork fine-tune (chunked context) on combined_gold_dataset,
-# starting from the stage-1 checkpoint.
+# Stage-2 hypernetwork fine-tune (chunked context) on combined_gold_dataset starting from the stage-1 checkpoint.
 set -euo pipefail
 
 sbatch slurm/run_gpu.sbatch src/hypernetwork/train_stage2.py \

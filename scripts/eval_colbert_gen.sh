@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generation-only eval over pre-retrieved ColBERT contexts (HotpotQA + ASQA).
-# Uses existing retrieval JSONs in $RETRIEVED — does NOT re-run retrieval.
+# Uses existing retrieval JSONs in $RETRIEVED
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +17,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # HotpotQA — ColBERT retrieval, short answers
 # ============================================================
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --retrieved_input "$RETRIEVED/hotpotQA_compact_colbert_d2l_gemma.json" \
   --pipeline doc2lora \
@@ -26,8 +26,7 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --max_new_tokens 32 \
   --gen_output "$RETRIEVED/hotpotQA_compact_colbert_d2l_gemma_topk_gen.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
-# Reuse d2l retrieval file — ColBERT output is LLM-independent.
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --retrieved_input "$RETRIEVED/hotpotQA_compact_colbert_d2l_gemma.json" \
   --pipeline regular \
@@ -37,10 +36,10 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --gen_output "$RETRIEVED/hotpotQA_compact_colbert_regular_gemma_topk_gen.json"
 
 # ============================================================
-# ASQA — ColBERT retrieval, full/long answers
+# ASQA — ColBERT retrieval, long answers
 # ============================================================
 
-# ---- doc2lora (Gemma stage-2 hypernet) ----
+# doc2lora (Gemma stage-2 hypernet)
 sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --retrieved_input "$RETRIEVED/asqa_gold_colbert_d2l_gemma.json" \
   --pipeline doc2lora \
@@ -50,7 +49,7 @@ sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --max_new_tokens 128 \
   --gen_output "$RETRIEVED/asqa_gold_colbert_d2l_gemma_topk_gen.json"
 
-# ---- regular LLM (gemma-2-2b-it) ----
+# regular LLM (gemma-2-2b-it)
 sbatch slurm/run_gpu.sbatch src/standard_rag/gen_from_retrieved.py \
   --retrieved_input "$RETRIEVED/asqa_gold_colbert_regular_gemma.json" \
   --pipeline regular \
