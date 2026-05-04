@@ -23,7 +23,7 @@ from src.hypernetwork.inference import (
 )
 from src.evaluation.retrieval_aware import (
     apply_refusal_credit,
-    compute_containment,
+    compute_contain,
     compute_em,
     compute_f1,
     compute_rouge_l,
@@ -40,36 +40,36 @@ load_dotenv()
 
 DATA_PATH = "./data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 
-# backbone used for both dense retrieval and ColBERT-style token embeddings
+# Backbone used for both dense retrieval and ColBERT-style token embeddings
 BGE_MODEL_NAME = "BAAI/bge-large-en-v1.5"
 
-# chunk data
+# Chunking
 CHUNK_SIZE = 480
 CHUNK_OVERLAP = 80
 
-# pinecone setup / dense retrieval
+# Pinecone / dense retrieval
 USE_PINECONE = True
 PINECONE_INDEX_NAME = "rag-index-v2"
 PINECONE_NAMESPACE = "default"
 
-# candidate generation pool size
+# Candidate generation
 BM25_CANDIDATE_K = 30
 DENSE_CANDIDATE_K = 30
 
-# final rerank cutoff — must be >= max(K_VALUES) below
+# Final rerank cutoff — must be >= max(K_VALUES) below
 RERANK_TOP_K = 10
 
 # k values evaluated for retrieval and generation
 K_VALUES = (10,)
 
-# late interaction encoder limits - keep align w chunking
+# Late-interaction encoder limits, keep these aligned with chunking 
 MAX_QUERY_LEN = 64
 MAX_PASSAGE_LEN = 480
 
-# evaluation size
+# Evaluation
 NUM_SAMPLES = 2
 
-UPSERT_PINECONE = True  # set to false to skip pinecone upload
+UPSERT_PINECONE = True  # set to False to skip Pinecone upload (use existing index)
 
 # -------------------------------------------------------------------
 # CLI ARGS 
@@ -164,7 +164,6 @@ print(f"Pinecone namespace: {PINECONE_NAMESPACE}")
 # LOAD DATA
 # -------------------------------------------------------------------
 
-# load parquet data
 ds = load_dataset("parquet", data_files=args.input)["train"]
 
 print("num rows:", len(ds))
@@ -190,10 +189,10 @@ print("Total contexts:", len(contexts))
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-# use dense embedding model for pinecone retrieval
+# Dense embedding model for Pinecone retrieval
 dense_model = SentenceTransformer(embedding_model_name_or_path, device=device)
 
-# transformer backbone for colbert scoring later
+# transformer backbone for token-level late interaction scoring
 tokenizer = AutoTokenizer.from_pretrained(embedding_model_name_or_path)
 encoder = AutoModel.from_pretrained(embedding_model_name_or_path).to(device)
 encoder.eval()
@@ -202,13 +201,15 @@ encoder.eval()
 # CHUNKING
 # -------------------------------------------------------------------
 
-# function to chunk text
 def chunk_text(text, chunk_size=480, overlap=80):
+    """
+    Split a document into overlapping token chunks.
+    """
     tokens = tokenizer.encode(
         text,
         add_special_tokens=False,
         truncation=True,
-        max_length=512,  # 512 max chunk size
+        max_length=512,
     )
 
     chunks = []
@@ -222,7 +223,6 @@ def chunk_text(text, chunk_size=480, overlap=80):
 
     return chunks
 
-# chunk contexts + store their ids
 chunked_contexts = []
 chunk_id_to_original = []
 
@@ -238,7 +238,6 @@ pid_to_text = {pid: text for pid, text in enumerate(chunked_contexts)}
 # BM25 INDEX
 # -------------------------------------------------------------------
 
-# bm25 for keyqord based retrieval
 tokenized_corpus = [c.lower().split() for c in chunked_contexts]
 bm25 = BM25Okapi(tokenized_corpus)
 
@@ -265,7 +264,7 @@ if USE_PINECONE:
     pinecone_index = pc.Index(PINECONE_INDEX_NAME)
 
     if UPSERT_PINECONE:
-        # build dense embeddings for all chunks
+        # Build dense embeddings for all chunks
         context_inputs = ["passage: " + c for c in chunked_contexts]
         context_embeddings = dense_model.encode(
             context_inputs,
@@ -308,14 +307,15 @@ else:
 
 class ColBERTStyleScorer:
     """
-    colbert style reranker
+    Lightweight ColBERT-style reranker.
 
-    score(q, p) = sum_i max_j <q_i, p_j>
-    
-      - q_i = query token embeddings
-      - p_j = passage token embeddings
+    Score(q, p) = sum_i max_j <q_i, p_j>
+
+    Where:
+      - q_i are query token embeddings
+      - p_j are passage token embeddings
       - embeddings are L2-normalized
-      - special tokens and padding  removed
+      - special tokens and padding are removed
     """
 
     def __init__(
@@ -334,7 +334,7 @@ class ColBERTStyleScorer:
         self.max_query_len = max_query_len
         self.max_passage_len = max_passage_len
 
-        # cache passage token embeddings by pid 
+        # Cache passage token embeddings by pid. 
         self.passage_cache = {} [num_tokens, hidden_dim]
 
     def _prefix_texts(self, texts, is_query):
@@ -370,10 +370,14 @@ class ColBERTStyleScorer:
         attention_mask = inputs["attention_mask"]
 
         for i in range(len(prefixed_texts)):
+            # Valid token span includes [CLS] ... [SEP] with padding after SEP.
             valid_len = int(attention_mask[i].sum().item())
+
+            # Remove [CLS] at position 0 and [SEP] at position valid_len - 1.
+            # This leaves only real text tokens.
             token_emb = hidden[i, 1:valid_len - 1, :]
 
-            #fallback for short inputs
+            # Fallback for very short inputs, though this should rarely happen.
             if token_emb.shape[0] == 0:
                 token_emb = hidden[i, :1, :]
 
@@ -381,13 +385,17 @@ class ColBERTStyleScorer:
 
         return seqs
 
-    # encode query
     def encode_query(self, query):
+        """
+        Encode one query into token embeddings on the current device.
+        """
         emb = self._encode_batch([query], is_query=True)[0]
         return emb.to(self.device)
 
-    # encode+cache any missing candidates
     def ensure_passage_cache(self, pids):
+        """
+        Encode and cache any missing candidate passages.
+        """
         missing_pids = [pid for pid in pids if pid not in self.passage_cache]
         if not missing_pids:
             return
@@ -398,23 +406,29 @@ class ColBERTStyleScorer:
         for pid, emb in zip(missing_pids, missing_embs):
             self.passage_cache[pid] = emb
 
-    # compute max sim score between query & passage
     def score_query_passage(self, query_emb, passage_emb):
+        """
+        Compute the exact ColBERT-style MaxSim score.
+        query_emb: [q_len, dim]
+        passage_emb:[p_len, dim]
+        """
         passage_emb = passage_emb.to(self.device)
 
-        # sim matrix
+        # Similarity matrix: [q_len, p_len]
         sim = query_emb @ passage_emb.T
 
-        # max over passage token for every query token
+        # Max over passage tokens for each query token: [q_len]
         max_per_query_token = sim.max(dim=1).values
 
-        # compute sum
+        # Sum over query tokens => scalar score
         return float(max_per_query_token.sum().item())
 
     @torch.inference_mode()
-
-    # rerank candidate list
     def rerank(self, query, candidate_pids, top_k=10):
+        """
+        Rerank a candidate list of passage ids.
+        """
+        # Deduplicate while preserving order
         candidate_pids = list(dict.fromkeys(int(pid) for pid in candidate_pids))
 
         if not candidate_pids:
@@ -431,7 +445,7 @@ class ColBERTStyleScorer:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
-# initialize reranker
+# Initialize reranker
 colbert_scorer = ColBERTStyleScorer(
     tokenizer=tokenizer,
     encoder=encoder,
@@ -445,8 +459,10 @@ colbert_scorer = ColBERTStyleScorer(
 # RETRIEVAL HELPERS
 # -------------------------------------------------------------------
 
-# generate bm25 candidates
 def retrieve_bm25_pids(query, top_k=30):
+    """
+    BM25 candidate generation, returning passage IDs.
+    """
     tokenized_query = query.lower().split()
     scores = bm25.get_scores(tokenized_query)
 
@@ -458,8 +474,10 @@ def retrieve_bm25_pids(query, top_k=30):
 
     return top_indices
 
-# generate dense candidates
 def retrieve_dense_pids(query, top_k=30):
+    """
+    Dense candidate generation via Pinecone, returning passage IDs.
+    """
     if not USE_PINECONE or pinecone_index is None:
         return []
 
@@ -488,8 +506,10 @@ def retrieve_dense_pids(query, top_k=30):
 
     return pids
 
-# concatenate candidates from bm25 + dense/bge
 def combine_candidate_pids(*pid_lists):
+    """
+    Merge lists of pids while preserving order and removing duplicates.
+    """
     merged = []
     seen = set()
 
@@ -502,8 +522,13 @@ def combine_candidate_pids(*pid_lists):
 
     return merged
 
-# generate candidates + rerank w colvert
 def retrieve_with_colbert_rerank(query, top_k=10, candidate_k=50):
+    """
+    1) Generate candidates from BM25 + dense retrieval
+    2) Rerank candidates with ColBERT-style MaxSim
+
+    Returns retrieved_texts and scored_pids
+    """
     bm25_pids = retrieve_bm25_pids(query, top_k=candidate_k)
     dense_pids = retrieve_dense_pids(query, top_k=candidate_k)
 
@@ -523,30 +548,31 @@ def retrieve_with_colbert_rerank(query, top_k=10, candidate_k=50):
 #  EVAL HELPERS
 # -------------------------------------------------------------------
 
-# post process llm output into short answer
 def extract_answer_span(text, gold):
+    """Post-process free-form LLM output into a short answer span."""
     if not text:
         return ""
 
     gold_norm = normalize_answer(gold)
 
-    # look at the first word of the raw prediction for yes or no answer
+    # look at the first word of the raw prediction to get a yes or no answer
     first_word = re.split(r"[\s,.!?:;]+", text.strip().lower(), maxsplit=1)[0]
     if gold_norm in {"yes", "no"} and first_word in {"yes", "no"}:
         return first_word
 
-    # strip common markdowns
+    # Strip common markdowns
     t = text.strip()
     t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
     t = t.replace("**", "").replace("*", "").replace("`", "")
 
+    # Take the first non-empty line and drop list/heading markers.
     for line in t.split("\n"):
         line = re.sub(r"^[\-\*#\d\.\)]+\s*", "", line.strip())
         if line:
             t = line
             break
 
-    # take first sentence
+    # Take the first sentence.
     m = re.match(r"^(.+?[.!?])(?:\s|$)", t)
     if m:
         t = m.group(1).rstrip(".!?")
@@ -602,8 +628,9 @@ def load_generator(pipeline: str, model_path: str | None):
         return load_baseline(resolved) if resolved else load_baseline()
     raise ValueError(f"Unknown pipeline: {pipeline}")
 
-# run generation - return (prediction, latency_sec, peak_mem_mb)
+
 def generate_answer(pipeline, model, tokenizer, context, query, max_new_tokens, answer_style="short"):
+    """Run one generation, return (prediction, latency_sec, peak_mem_mb)."""
     example = {
         "context": context,
         "prompts": [query],
@@ -645,36 +672,40 @@ def compute_recall_text(retrieved_texts, gold_sentences, k):
     ))
 
 
-# text based mrr - rank of first chunk containing any gold semtence
 def compute_mrr_text(retrieved_texts, gold_sentences, k):
+    """Text-based MRR: rank of first chunk containing any gold sentence."""
     for i, ctx in enumerate(retrieved_texts[:k]):
         if any(gold.lower() in ctx.lower() for gold in gold_sentences):
             return 1.0 / (i + 1)
     return 0.0
 
-# index based recall - any top k chunks source doc id matches query example id
+
 def compute_recall_index(scored_pids, gold_example_id, chunk_id_to_original, k):
+    """Index-based recall: any top-k chunk's source document id matches the query's example id."""
     for pid, _ in scored_pids[:k]:
         if chunk_id_to_original[pid] == gold_example_id:
             return 1
     return 0
 
-# index based MRR - rank first chunk whose source doc id matches
+
 def compute_mrr_index(scored_pids, gold_example_id, chunk_id_to_original, k):
+    """Index-based MRR: rank of first chunk whose source doc id matches."""
     for i, (pid, _) in enumerate(scored_pids[:k]):
         if chunk_id_to_original[pid] == gold_example_id:
             return 1.0 / (i + 1)
     return 0.0
 
-# best token f1 between any top k chunk and full gold context string
+
 def compute_f1_gold(retrieved_texts, gold_context, k):
+    """Best token-F1 between any top-k chunk and the full gold context string."""
     best_f1 = 0.0
     for ctx in retrieved_texts[:k]:
         best_f1 = max(best_f1, compute_f1(ctx, gold_context))
     return best_f1
 
-# simple sentence splitter
+
 def extract_gold_sentences(text):
+    # Simple sentence splitter (can be replaced with nltk.sent_tokenize for better accuracy)
     sentences = text.strip().split('\n')
     return sentences
 
@@ -757,7 +788,7 @@ if __name__ == "__main__":
             mrr_index[k] += compute_mrr_index(scored, i, chunk_id_to_original, k=k)
             f1_k[k] += compute_f1_gold(retrieved_texts, gold_contexts[i], k=k)
 
-        # perform GENERATION for top k
+        # perform GENERATION for top-k
         if run_generation:
             gen_results = {}
 
@@ -765,11 +796,11 @@ if __name__ == "__main__":
                 top_k_texts = retrieved_texts[:k]
 
                 if args.pipeline == "doc2lora":
-                    # always internalize each chunk as a separate LoRA adapter.
+                    # Always internalize each chunk as a separate LoRA adapter.
                     gen_context = list(top_k_texts)
                 else:
                     gen_context = "\n\n".join(top_k_texts)
-                    # skip generation if context + generation budget exceeds the window
+                    # Skip generation if context + generation budget exceeds the window.
                     if model_max_len is not None and not context_fits_in_window(
                         gen_tokenizer, gen_context, query,
                         args.answer_style, args.max_new_tokens, model_max_len,
@@ -816,10 +847,10 @@ if __name__ == "__main__":
 
                 em = compute_em(prediction, true_answer)
                 f1 = compute_f1(prediction, true_answer)
-                contain = compute_containment(raw_prediction, true_answer)
+                contain = compute_contain(raw_prediction, true_answer)
                 rouge_l = compute_rouge_l(prediction, true_answer)
 
-                # retrieval-aware - credit correct refusals when gold isn't in context
+                # Retrieval-aware: credit correct refusals when gold isn't in context.
                 pred_for_refusal_check = prediction if args.answer_style != "full" else raw_prediction
                 em_a, f1_a, rouge_l_a, contain_a, refused_correct, refused, gold_found = apply_refusal_credit(
                     em, f1, rouge_l, contain, pred_for_refusal_check, true_answer, top_k_texts,
@@ -862,7 +893,7 @@ if __name__ == "__main__":
 
         retrieved_records.append(record)
 
-    # report  final metrics
+    # Report the final metrics
     for k in K_VALUES:
         recall_text[k] /= num_samples
         recall_index[k] /= num_samples

@@ -48,7 +48,7 @@ from src.hypernetwork.inference import (
 )
 from src.evaluation.retrieval_aware import (
     apply_refusal_credit,
-    compute_containment,
+    compute_contain,
     compute_em,
     compute_f1,
     compute_rouge_l,
@@ -863,7 +863,7 @@ def main():
 
                 em = compute_em(prediction, true_answer)
                 f1 = compute_f1(prediction, true_answer)
-                contain = compute_containment(raw_prediction, true_answer)
+                contain = compute_contain(raw_prediction, true_answer)
                 rouge_l = compute_rouge_l(prediction, true_answer)
 
                 pred_for_refusal_check = prediction if args.answer_style != "full" else raw_prediction
