@@ -87,7 +87,7 @@ including the flash-attn / flashinfer wheels we used on the lab cluster.
 
 Prepared datasets used by the training and eval scripts live under
 `data/raw_datasets/`. Run builders from the repo root. A few builders still
-have legacy hard-coded paths from the original Doc2LoRA code, so the table
+have hard-coded paths from the original Doc2LoRA code, so the table
 below distinguishes the checked-in dataset location from the script's current
 raw output.
 
@@ -123,7 +123,7 @@ splits and the combined gold dataset.
 
 ### NIAH dataset
 
-See [§4 NIAH](#niah-needle-in-a-haystack) for the full pipeline. The
+See [4 NIAH](#niah-needle-in-a-haystack) for the full pipeline. The
 short version:
 
 ```bash
@@ -274,7 +274,7 @@ python data/generate_hotpotQA_niah.py \
   --n-distractors 25
 ```
 
-Requires `hotpotQA_compact/test/ds.parquet` (built in §2) and a
+Requires `hotpotQA_compact/test/ds.parquet` (built in 2) and a
 `needles.json` defining the needle entries. If you omit `--n-samples`, the
 script defaults to a 20-sample smoke-test dataset.
 
