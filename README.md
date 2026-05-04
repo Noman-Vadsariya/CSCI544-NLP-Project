@@ -209,7 +209,7 @@ Where each top-k value comes from:
 | k = 10 (ColBERT) | Baked into [src/standard_rag/rag_colbert_reranker.py](src/standard_rag/rag_colbert_reranker.py) (`K_VALUES = (10,)`); produced by [eval_colbert_rag.sh](scripts/eval_colbert_rag.sh) during the end-to-end run. |
 | k = 10 (neural) | Baked into [src/neural_retrieval_rag/neural_rag.py](src/neural_retrieval_rag/neural_rag.py) (`K_VALUES = (10,)`); produced by [eval_neural_rag.sh](scripts/eval_neural_rag.sh) during the end-to-end run. |
 
-So a complete reproduction = run the end-to-end script (gives k=10 metrics and
+So a complete reproduction, run the end-to-end script (gives k=10 metrics and
 generation for both retrievers, while neural also stores 20 retrieved passages
 by default), then run the matching generation-only script (gives k=2,5,10 over
 the same cached retrieval).
@@ -287,9 +287,7 @@ The neural SPLADE NIAH eval is local and does not use Pinecone.
 | ColBERT reranker | [scripts/eval_colbert_rag_niah.sh](scripts/eval_colbert_rag_niah.sh) |
 | Neural (SPLADE) | [scripts/eval_neural_rag_niah.sh](scripts/eval_neural_rag_niah.sh) |
 
-NIAH metrics (underscore-aware normalization and retrieval-aware refusal
-credit) are computed at generation time, so no separate rescore step is
-required.
+The eval scripts will output json files with the retrieved and generated results and the evaluation metrics.
 
 ---
 
