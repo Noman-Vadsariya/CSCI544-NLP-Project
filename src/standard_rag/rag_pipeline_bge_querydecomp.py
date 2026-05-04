@@ -21,7 +21,9 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ======================================== load data ========================================
+'''
+load data
+'''
 
 path = "/home1/vuvaness/CSCI544-NLP-Project/data/raw_datasets/hotpotQA_compact/test/ds.parquet"
 ds = load_dataset("parquet", data_files=path)["train"]
@@ -33,7 +35,9 @@ answers = [x[0] for x in ds["responses"]]
 print("Total QA pairs:", len(queries))
 
 
-# ======================================== chunking ========================================
+'''
+chunking
+'''
 
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
 
@@ -58,13 +62,17 @@ for c in contexts:
 print("Total chunked contexts:", len(chunked_contexts))
 
 
-# ======================================== BM25 ========================================
+'''
+BM25
+'''
 
 tokenized_corpus = [c.lower().split() for c in chunked_contexts]
 bm25 = BM25Okapi(tokenized_corpus)
 
 
-# ======================================== embedding model ========================================
+'''
+embedding model
+'''
 
 torch.set_num_threads(1)
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -73,7 +81,9 @@ print("Using device:", device)
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 
 
-# ======================================== pinecone ========================================
+'''
+pinecone
+'''
 
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index_name = "rag-index-v6"
@@ -89,12 +99,16 @@ if index_name not in [idx.name for idx in pc.list_indexes()]:
 index = pc.Index(index_name)
 
 
-# ======================================== reranker ========================================
+'''
+reranker
+'''
 
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
 
 
-# ======================================== query decomposition ========================================
+'''
+query decomposition
+'''
 
 def decompose_query_llm(query, max_retries=3):
     for attempt in range(max_retries):
@@ -132,7 +146,6 @@ Return ONLY the sub-questions, one per line. No numbering or bullets.
                 if len(line.strip()) > 3
             ]
 
-            # ensure original query is first
             if query in subqueries:
                 subqueries.remove(query)
 
@@ -147,7 +160,9 @@ Return ONLY the sub-questions, one per line. No numbering or bullets.
     raise RuntimeError("LLM decomposition failed")
 
 
-# ======================================== retrieval ========================================
+'''
+retrieval
+'''
 
 def retrieve_contexts(query, top_k=25):
     query_embedding = model.encode(
@@ -188,10 +203,8 @@ def retrieve_with_rerank(query, subqueries, top_k=10):
         all_result_lists.append(retrieve_contexts(q_sub, top_k=fetch_k))
         all_result_lists.append(retrieve_bm25(q_sub, top_k=fetch_k))
 
-    # RRF preserves rank signal across lists
     candidates = reciprocal_rank_fusion(all_result_lists)[:60]
 
-    # rerank against all subqueries, take best score per candidate
     best_scores = [-999.0] * len(candidates)
     for q_sub in subqueries:
         pairs = [[q_sub, c] for c in candidates]
@@ -205,16 +218,20 @@ def retrieve_with_rerank(query, subqueries, top_k=10):
     return [c for c, _ in ranked[:top_k]]
 
 
-# ======================================== metrics ========================================
+'''
+metrics
+'''
 
 def compute_mrr(ranked, answer):
     for i, ctx in enumerate(ranked):
         if answer.lower() in ctx.lower():
-            return 1 / (i+1)
+            return 1 / (i + 1)
     return 0
 
 
-# ======================================== eval ========================================
+'''
+eval
+'''
 
 num_correct = 0
 mrr_total = 0
@@ -223,12 +240,10 @@ num_samples = 500
 print("\nRunning evaluation...")
 
 for i in tqdm(range(num_samples), desc="Eval Progress"):
-
     q = queries[i]
     ans = answers[i]
 
     subqueries = decompose_query_llm(q)
-
     retrieved = retrieve_with_rerank(q, subqueries, top_k=10)
 
     found = any(ans.lower() in ctx.lower() for ctx in retrieved)
@@ -237,7 +252,6 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
         num_correct += 1
 
     mrr_total += compute_mrr(retrieved, ans)
-
 
 accuracy = num_correct / num_samples
 mrr = mrr_total / num_samples

@@ -43,7 +43,7 @@ def build_ctx_ids(n_tokens, ctx_tokenizer):
 
 
 def chunk_ctx_ids(ctx_ids, chunk_len, model_name):
-    """Split ctx_ids into chunks, applying affixes from CTX_AFFIXES."""
+    """Split ctx_ids into chunks"""
     if chunk_len <= 0 or len(ctx_ids) <= chunk_len:
         return [ctx_ids]
 
@@ -138,6 +138,7 @@ def main():
     chunk_lens = [len(c) for c in chunks]
     print(f"\nContext: {len(raw_ids)} tokens -> {n_chunks} chunk(s), lengths: {chunk_lens}")
 
+    # check if we get a OOM with the chunk length
     try:
         peak = try_forward(model, chunks, tokenizer, ctx_tokenizer)
         print(f"OK  |  peak VRAM: {peak:.2f} GB")

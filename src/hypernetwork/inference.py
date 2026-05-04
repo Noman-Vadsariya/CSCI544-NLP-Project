@@ -6,10 +6,10 @@ from src.hypernetwork.ctx_to_lora.model_loading import get_tokenizer
 from src.hypernetwork.ctx_to_lora.modeling.hypernet import ModulatedPretrainedModel
 
 
-HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin"
+# HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin"
 # HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage1_hotpotqa_gold_finetune/pytorch_model.bin"
 # HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage1_combined_noisy_dataset_finetune/pytorch_model.bin"
-HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage1_hotpotQA_gold_compact_finetune/pytorch_model.bin"
+# HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage1_hotpotQA_gold_compact_finetune/pytorch_model.bin"
 # HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage1_hotpotQA_gold_comapct_scratch/pytorch_model.bin"
 HYPERNET_CHECKPOINT = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/train_outputs/stage2_hotpotQA_gold_compact_finetune/pytorch_model.bin"
 BASELINE_MODEL_PATH = "/project2/robinjia_875/lijc/CSCI544-NLP-Project/checkpoints/gemma-2-2b-it-bin"
@@ -68,6 +68,7 @@ EXAMPLE_INPUT = {
 }
 
 
+
 def load_hypernet(checkpoint_path: str = HYPERNET_CHECKPOINT):
     state_dict = torch.load(checkpoint_path, weights_only=False)
     model = ModulatedPretrainedModel.from_state_dict(
@@ -82,25 +83,51 @@ def load_baseline(model_path: str = BASELINE_MODEL_PATH):
         model_path, extra_special_tokens={}
     )
     model = AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, device_map="auto"
+        model_path,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        attn_implementation="eager",
     )
+
+    # getting some cuda errors on gpu, temporary fix 
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
     model.eval()
     return model, tokenizer
 
 
-def run_hypernet(model, tokenizer, example, max_new_tokens=512):
+def run_hypernet(model, tokenizer, example, max_new_tokens=512, answer_style="short"):
     model.reset()
     context = example["context"]
     if isinstance(context, (list, tuple)):
         for chunk in context:
             model.internalize(chunk)
+        context_str = "\n\n".join(context)
     else:
         model.internalize(context)
+        context_str = context
 
     decoded = []
     for prompt in example["prompts"]:
+        if answer_style == "full":
+            user_content = (
+                f"Answer the question fully and completely based on the given passages. "
+                f"Your answer should cover all relevant aspects and may be multiple sentences, but keep it concise. "
+                f"If the passages do not contain enough information to answer, reply with exactly: answer not in context.\n\n"
+                f"Passages:\n{context_str}\n\n"
+                f"Question: {prompt}"
+            )
+        else:
+            user_content = (
+                f"Answer the question using only the given passages. "
+                f"If the passages do not contain the answer, reply with exactly: answer not in context. "
+                f"Otherwise give only the answer and do not output any other words.\n\n"
+                f"Passages:\n{context_str}\n\n"
+                f"Question: {prompt}"
+            )
+
         chat_ids = tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}],
+            [{"role": "user", "content": user_content}],
             add_special_tokens=False,
             return_attention_mask=False,
             add_generation_prompt=True,
@@ -112,15 +139,25 @@ def run_hypernet(model, tokenizer, example, max_new_tokens=512):
     return decoded
 
 
-def run_baseline(model, tokenizer, example, max_new_tokens=512):
+def run_baseline(model, tokenizer, example, max_new_tokens=512, answer_style="short"):
     decoded = []
     for prompt in example["prompts"]:
-        user_content = (
-            f"Answer the question based on the given passages. "
-            f"Only give me the answer and do not output any other words.\n\n"
-            f"Passages:\n{example['context']}\n\n"
-            f"Question: {prompt}"
-        )
+        if answer_style == "full":
+            user_content = (
+                f"Answer the question fully and completely based on the given passages. "
+                f"Your answer should cover all relevant aspects and may be multiple sentences, but keep it concise. "
+                f"If the passages do not contain enough information to answer, reply with exactly: answer not in context.\n\n"
+                f"Passages:\n{example['context']}\n\n"
+                f"Question: {prompt}"
+            )
+        else:
+            user_content = (
+                f"Answer the question using only the given passages. "
+                f"If the passages do not contain the answer, reply with exactly: answer not in context. "
+                f"Otherwise give only the answer and do not output any other words.\n\n"
+                f"Passages:\n{example['context']}\n\n"
+                f"Question: {prompt}"
+            )
         chat_ids = tokenizer.apply_chat_template(
             [{"role": "user", "content": user_content}],
             add_special_tokens=False,
@@ -168,7 +205,7 @@ def main():
     torch.cuda.synchronize(device)
 
     start_time = time.time()
-    baseline_output = run_baseline(baseline_model, baseline_tokenizer, example)
+    baseline_output = run_baseline(baseline_model, baseline_tokenizer, example, answer_style="full")
     torch.cuda.synchronize(device)
     end_time = time.time()
 

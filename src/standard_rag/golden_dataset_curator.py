@@ -18,7 +18,9 @@ import pyarrow.parquet as pq
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# ================================== load data ==================================
+'''
+load data 
+'''
 
 contexts = []
 queries = []
@@ -42,7 +44,9 @@ contexts = contexts
 queries = queries
 answers = answers
 
-# ================================== embeddings ==================================
+'''
+embeddings 
+'''
 
 # limit pytorch to 1 thread to avoid oversubscription
 torch.set_num_threads(1)
@@ -61,7 +65,9 @@ context_embeddings = model.encode(
     show_progress_bar=True,
 ).astype("float32")
 
-# ================================== build vector index - pinecone ==================================
+'''
+build vector index - pinecone 
+'''
 
 print("Uploading embeddings to Pinecone...")
 
@@ -103,7 +109,9 @@ for i in range(0, len(vectors), batch_size):
 
 print("Pinecone index ready!")
 
-# ================================== build vector index - faiss ==================================
+'''
+ build vector index - faiss
+'''
 
 # dim = context_embeddings.shape[1]
 
@@ -113,7 +121,9 @@ print("Pinecone index ready!")
 # print("FAISS index built:", index.ntotal)
 
 
-# ================================== bert reranker ==================================
+'''
+bert reranker
+'''
 
 ### initialize bert cross encoder for reranking retrieved contexts
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -138,7 +148,9 @@ def retrieve_with_rerank(query, top_k=5):
     return [ctx for ctx, _ in ranked[:top_k]]
 
 
-# ================================== test retrieval ==================================
+'''
+test retrieval
+'''
 
 
 ### function to retrieve contexts from piecone based on query embedding
@@ -185,7 +197,9 @@ num_samples = len(queries)  # start small for testing
 # print(f"\nRetrieval Accuracy@5: {accuracy:.4f}")
 
 
-# ===================== Golden Dataset Curation =====================
+'''
+Golden Dataset Curation 
+'''
 
 def curate_golden_dataset_streaming(
     queries, answers, retrieve_with_rerank, output_path, batch_size=10

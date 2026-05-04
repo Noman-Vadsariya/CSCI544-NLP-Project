@@ -1,5 +1,7 @@
 """Simplified stage 1 training: finetune hypernet on a dataset (1 chunk per context by default).
 
+Model code and helpers extracted from original Doc2LoRA repo
+
 Example (from checkpoint):
     uv run python3 src/train_stage1.py \
         --checkpoint checkpoints/trained_d2l/gemma_2b_d2l/checkpoint-20000/pytorch_model.bin \

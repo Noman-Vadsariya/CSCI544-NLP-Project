@@ -1,8 +1,8 @@
 """Stage 2 hypernet training: multi-chunk noisy contexts.
 
-Stage 2 fine-tunes the hypernetwork on contexts split into multiple retrieval
-chunks, so it learns to aggregate longer and noisier evidence than stage 1
-(which trains with a single chunk per context).
+Model code and helpers extracted from original Doc2LoRA repo
+
+Stage 2 fine-tunes the hypernetwork on contexts split into multiple retrieval chunks, so it learns to aggregate longer and noisier evidence than stage 1 (which trains with a single chunk per context).
 
 Example (from a stage 1 checkpoint):
     uv run python3 src/hypernetwork/train_stage2.py \
@@ -83,8 +83,6 @@ logger = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser(description="Stage 2 hypernet training (multi-chunk)")
 
-    # Model either from --checkpoint OR --model_name (from scratch) OR
-    # --resume_from_checkpoint (folder with Trainer state + pytorch_model.bin)
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--checkpoint", help="Path to pytorch_model.bin checkpoint")
     source.add_argument(
@@ -94,7 +92,7 @@ def parse_args():
     source.add_argument(
         "--resume_from_checkpoint",
         help=(
-            "Path to a Trainer checkpoint folder (e.g. .../checkpoint-5000). "
+            "Path to a Trainer checkpoint folder "
             "Loads model weights from pytorch_model.bin inside the folder and "
             "restores optimizer/scheduler/global_step via the HF Trainer."
         ),
@@ -429,7 +427,7 @@ def main():
     )
 
     if val_ds_raw is None:
-        # No validation split available; fall back to a slice of training data
+        # Check if the validation split is given, if not just use a chunk of the training data
         logger.info("No validation split found; using a slice of training data")
         val_ds_raw = train_ds_raw.take(args.max_val_samples)
         train_ds_raw = train_ds_raw.skip(args.max_val_samples)

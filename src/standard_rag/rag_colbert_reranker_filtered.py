@@ -43,8 +43,7 @@ DENSE_CANDIDATE_K = 30
 # Final rerank cutoff
 RERANK_TOP_K = 10
 
-# Late-interaction encoder limits
-# Keep these aligned with your chunking for the best retrieval signal.
+# late interaction encoder limits - keep align w chunking
 MAX_QUERY_LEN = 64
 MAX_PASSAGE_LEN = 480
 
@@ -79,11 +78,10 @@ print("Total contexts:", len(contexts))
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
-# Dense embedding model for Pinecone retrieval
+# use dense embedding model for pinecone retrieval
 dense_model = SentenceTransformer(BGE_MODEL_NAME, device=device)
 
-# Raw transformer backbone for token-level late interaction scoring
-# Important: this is NOT SentenceTransformer pooling; we use last_hidden_state.
+# transformer backbone for colbert scoring later
 tokenizer = dense_model.tokenizer
 encoder = dense_model[0].auto_model
 encoder.eval()
@@ -123,8 +121,6 @@ for i, c in enumerate(contexts):
     chunk_id_to_original.extend([i] * len(chunks))
 
 print("Total chunked contexts:", len(chunked_contexts))
-
-# Stable mapping: pid -> text
 pid_to_text = {pid: text for pid, text in enumerate(chunked_contexts)}
 
 # -------------------------------------------------------------------
@@ -200,17 +196,14 @@ else:
 
 class ColBERTStyleScorer:
     """
-    Lightweight ColBERT-style reranker.
+    colbert style reranker
 
-    Score(q, p) = sum_i max_j <q_i, p_j>
-
-    Where:
-      - q_i are query token embeddings
-      - p_j are passage token embeddings
+    score(q, p) = sum_i max_j <q_i, p_j>
+    
+      - q_i = query token embeddings
+      - p_j = passage token embeddings
       - embeddings are L2-normalized
-      - special tokens and padding are removed
-
-    This uses the same transformer backbone for query and passage.
+      - special tokens and padding  removed
     """
 
     def __init__(
@@ -269,8 +262,7 @@ class ColBERTStyleScorer:
             # Valid token span includes [CLS] ... [SEP] with padding after SEP.
             valid_len = int(attention_mask[i].sum().item())
 
-            # Remove [CLS] at position 0 and [SEP] at position valid_len - 1.
-            # This leaves only real text tokens.
+            # Remove [CLS] at position 0 and [SEP] at position valid_len - 1 so now we only have the real text tokens
             token_emb = hidden[i, 1:valid_len - 1, :]
 
             # Fallback for very short inputs, though this should rarely happen.
@@ -582,7 +574,7 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
         "answer": true_answer,
     })
 
-    # ---------------- accuracy - EM ----------------
+    # accuracy and EM 
     found_ctx = any(
         true_answer.lower() in ctx.lower()
         or all(word in ctx.lower() for word in true_answer.lower().split())
@@ -592,15 +584,15 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
     if found_ctx:
         accuracy += 1
 
-    # ---------------- recall ----------------
+    # recall
     recall_2 += compute_recall_at_k(retrieved_texts, true_answer, k=2)
     recall_5 += compute_recall_at_k(retrieved_texts, true_answer, k=5)
 
-    # ---------------- mrr ----------------
+    # mrr
     mrr_2_total += compute_mrr_at_k(scored, true_answer, k=2)
     mrr_5_total += compute_mrr_at_k(scored, true_answer, k=5)
 
-    # ---------------- F1  ----------------
+    # F1 
     best_f1 = 0.0
     for ctx in retrieved_texts:
         f1 = compute_f1(ctx, true_answer)
@@ -613,7 +605,7 @@ for i in tqdm(range(num_samples), desc="Eval Progress"):
     # TODO
 
 
-# ---------------- final metrics ----------------
+# final metrics 
 
 accuracy /= num_samples
 recall_2 /= num_samples
@@ -623,12 +615,12 @@ mrr_5 = mrr_5_total / num_samples
 f1_score = f1_total / num_samples  
 
 print("\n===== RESULTS =====")
-print(f"Accuracy@10 : {accuracy:.4f}")
-print(f"Recall@2    : {recall_2:.4f}")
-print(f"Recall@5    : {recall_5:.4f}")
-print(f"MRR@2       : {mrr_2:.4f}")
-print(f"MRR@5       : {mrr_5:.4f}")
-print(f"F1 (word)   : {f1_score:.4f}")
+print(f"Accuracy@10: {accuracy:.4f}")
+print(f"Recall@2: {recall_2:.4f}")
+print(f"Recall@5: {recall_5:.4f}")
+print(f"MRR@2: {mrr_2:.4f}")
+print(f"MRR@5: {mrr_5:.4f}")
+print(f"F1 (word): {f1_score:.4f}")
 
 Path(RETRIEVED_JSON_PATH).parent.mkdir(parents=True, exist_ok=True)
 with open(RETRIEVED_JSON_PATH, "w") as f:
